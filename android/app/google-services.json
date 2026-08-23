@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "68213730434",
+    "project_id": "collapse-risk-tracker",
+    "storage_bucket": "collapse-risk-tracker.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:68213730434:android:1f35a7f0188c729d3b189b",
+        "android_client_info": {
+          "package_name": "com.example.collapse_risk_tracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCLuVAONU2Yns4yCThVY411vKf4_MWmZKU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
