@@ -47,43 +47,44 @@ class ParcelsListScreen extends ConsumerWidget {
         const SizedBox(height: 18),
         _FilterBar(resultCount: parcelsAsync.valueOrNull?.length),
         const SizedBox(height: 14),
-        Expanded(
-          child: parcelsAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (err, _) => AppEmptyState(
-              icon: Icons.error_outline,
-              title: 'تعذّر تحميل سجلّ العقارات',
-              description: err.toString(),
-            ),
-            data: (parcels) {
-              if (parcels.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.home_work_outlined,
-                  title: 'لا توجد عقارات مطابقة',
-                  description: 'جرّب تعديل كلمة البحث أو الفلاتر، أو أضف عقارًا جديدًا.',
-                );
-              }
-              return AppCard(
-                padding: EdgeInsets.zero,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width - 320),
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text('العقار')),
-                        DataColumn(label: Text('العنوان')),
-                        DataColumn(label: Text('الحالة')),
-                        DataColumn(label: Text('آخر تحديث')),
-                        DataColumn(label: Text('')),
-                      ],
-                      rows: parcels.map((p) => _buildRow(context, p)).toList(),
-                    ),
+        parcelsAsync.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 48),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (err, _) => AppEmptyState(
+            icon: Icons.error_outline,
+            title: 'تعذّر تحميل سجلّ العقارات',
+            description: err.toString(),
+          ),
+          data: (parcels) {
+            if (parcels.isEmpty) {
+              return const AppEmptyState(
+                icon: Icons.home_work_outlined,
+                title: 'لا توجد عقارات مطابقة',
+                description: 'جرّب تعديل كلمة البحث أو الفلاتر، أو أضف عقارًا جديدًا.',
+              );
+            }
+            return AppCard(
+              padding: EdgeInsets.zero,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width - 320),
+                  child: DataTable(
+                    columns: const [
+                      DataColumn(label: Text('العقار')),
+                      DataColumn(label: Text('العنوان')),
+                      DataColumn(label: Text('الحالة')),
+                      DataColumn(label: Text('آخر تحديث')),
+                      DataColumn(label: Text('')),
+                    ],
+                    rows: parcels.map((p) => _buildRow(context, p)).toList(),
                   ),
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
       ],
     );
