@@ -4,10 +4,10 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
 
 /// The circular countdown ring — one of the app's two signature motifs
-/// (the other is [TimelineRail]). Used for every hard deadline: the 48-hour
-/// evacuation compliance clock (BR-7), notice execution deadlines (BR-4),
-/// etc. Reuse this everywhere a deadline needs visualizing rather than
-/// inventing a new pattern per screen.
+/// (the other is [TimelineRail]). Used for every hard deadline: the
+/// 48-hour evacuation compliance clock (BR-7), notice execution deadlines
+/// (BR-4), etc. Reuse this everywhere a deadline needs visualizing rather
+/// than inventing a new pattern per screen.
 ///
 /// [progress] is 0.0–1.0 (fraction of the deadline elapsed, not remaining).
 /// [urgent] switches the ring to the danger color for near-expiry states.

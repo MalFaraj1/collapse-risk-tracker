@@ -8,6 +8,7 @@ abstract class FirestorePaths {
   FirestorePaths._();
 
   static const users = 'users';
+  static const neighborhoods = 'neighborhoods';
   static const parcels = 'parcels';
   static const buildings = 'buildings';
   static const cases = 'cases';

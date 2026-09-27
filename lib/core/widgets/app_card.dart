@@ -43,6 +43,8 @@ class AppCardWithHeader extends StatelessWidget {
     required this.child,
     this.icon,
     this.trailing,
+    this.count,
+    this.countColor,
     this.contentPadding = EdgeInsets.zero,
   });
 
@@ -50,6 +52,13 @@ class AppCardWithHeader extends StatelessWidget {
   final Widget child;
   final IconData? icon;
   final String? trailing;
+
+  /// Optional item count shown as a small badge beside the title (e.g. the
+  /// number of rows in a work queue).
+  final int? count;
+
+  /// Badge color when [count] is non-zero; defaults to navy.
+  final Color? countColor;
   final EdgeInsets contentPadding;
 
   @override
@@ -68,7 +77,9 @@ class AppCardWithHeader extends StatelessWidget {
             child: Row(
               children: [
                 if (icon != null) ...[Icon(icon, size: 18, color: AppColors.textMuted), const SizedBox(width: 8)],
-                Expanded(child: Text(title, style: Theme.of(context).textTheme.titleLarge)),
+                Flexible(child: Text(title, style: Theme.of(context).textTheme.titleLarge)),
+                if (count != null) ...[const SizedBox(width: 8), _CountBadge(count: count!, color: countColor)],
+                const Spacer(),
                 if (trailing != null)
                   Text(trailing!, style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
               ],
@@ -77,6 +88,31 @@ class AppCardWithHeader extends StatelessWidget {
           const Divider(height: 1),
           Padding(padding: contentPadding, child: child),
         ],
+      ),
+    );
+  }
+}
+
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.count, this.color});
+
+  final int count;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = count > 0;
+    final c = color ?? AppColors.navy;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      decoration: BoxDecoration(
+        color: active ? c : AppColors.bg,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: active ? null : Border.all(color: AppColors.border),
+      ),
+      child: Text(
+        '$count',
+        style: AppTypography.mono(fontSize: 11, weight: FontWeight.w700, color: active ? Colors.white : AppColors.textMuted),
       ),
     );
   }
@@ -93,24 +129,32 @@ class PageHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
+    final heading = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.headlineLarge),
-              if (subtitle != null) ...[
-                const SizedBox(height: 4),
-                Text(subtitle!,
-                    style: const TextStyle(fontSize: 13, color: AppColors.textMuted), maxLines: 2),
-              ],
-            ],
-          ),
-        ),
-        if (actions != null) ...[const SizedBox(width: 16), Wrap(spacing: 10, children: actions!)],
+        Text(title, style: Theme.of(context).textTheme.headlineLarge),
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Text(subtitle!, style: const TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.5), maxLines: 2),
+        ],
       ],
+    );
+    if (actions == null || actions!.isEmpty) return heading;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final actionsWrap = Wrap(spacing: 10, runSpacing: 10, children: actions!);
+        if (constraints.maxWidth < 720) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [heading, const SizedBox(height: 14), actionsWrap],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [Expanded(child: heading), const SizedBox(width: 16), actionsWrap],
+        );
+      },
     );
   }
 }
@@ -125,19 +169,29 @@ class StatCard extends StatelessWidget {
     required this.iconColor,
     required this.iconBackground,
     this.trailing,
+    this.onTap,
+    this.highlight = false,
   });
 
-  final String value;
+  /// The number to display, or `null` while it is still loading.
+  final String? value;
   final String label;
   final IconData icon;
   final Color iconColor;
   final Color iconBackground;
   final Widget? trailing;
+  final VoidCallback? onTap;
+
+  /// Tints the card with its [iconColor] — use when the value needs
+  /// attention (e.g. a non-zero overdue count).
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
+    final card = AppCard(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      backgroundColor: highlight ? Color.alphaBlend(iconBackground.withOpacity(.45), AppColors.surface) : null,
+      borderColor: highlight ? iconColor.withOpacity(.4) : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -154,11 +208,29 @@ class StatCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Text(value, style: AppTypography.mono(fontSize: 28, weight: FontWeight.w800, color: AppColors.text)),
+          SizedBox(
+            height: 38,
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: value == null
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text(value!,
+                      style: AppTypography.mono(
+                          fontSize: 28, weight: FontWeight.w800, color: highlight ? iconColor : AppColors.text)),
+            ),
+          ),
           const SizedBox(height: 2),
-          Text(label, style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
         ],
       ),
+    );
+    if (onTap == null) return card;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(onTap: onTap, child: card),
     );
   }
 }
@@ -166,14 +238,41 @@ class StatCard extends StatelessWidget {
 /// Shown when a list/collection has no data yet, or as the body of a
 /// not-yet-built screen (see [ComingSoonScreen]).
 class AppEmptyState extends StatelessWidget {
-  const AppEmptyState({super.key, required this.icon, required this.title, this.description});
+  const AppEmptyState({super.key, required this.icon, required this.title, this.description, this.compact = false});
 
   final IconData icon;
   final String title;
   final String? description;
 
+  /// A single-row version for places where many empty states stack up
+  /// (e.g. dashboard queues) and the full centered block wastes space.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
+    if (compact) {
+      return Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(color: AppColors.bg, borderRadius: BorderRadius.circular(AppRadius.md)),
+            child: Icon(icon, size: 18, color: AppColors.textFaint),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textBody)),
+                if (description != null)
+                  Text(description!, style: const TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(48),

@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "http://localhost:*",
+      "https://collapse-risk-tracker.web.app",
+      "https://collapse-risk-tracker.firebaseapp.com"
+    ],
+    "method": ["GET"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": ["Content-Type"]
+  }
+]

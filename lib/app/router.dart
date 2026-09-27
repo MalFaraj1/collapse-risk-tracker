@@ -24,9 +24,6 @@ import '../features/admin/admin_screen.dart';
 Widget _shelled(String route, Widget child) => AppShell(currentRoute: route, child: child);
 
 final routerProvider = Provider<GoRouter>((ref) {
-  // Re-evaluate redirect logic whenever auth state changes — this is what
-  // makes signing out immediately kick the user back to /login without a
-  // manual navigation call anywhere else in the app.
   final authNotifier = _AuthRefreshNotifier(ref);
 
   return GoRouter(
@@ -38,7 +35,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       if (!isSignedIn && !isLoggingIn) return '/login';
       if (isSignedIn && isLoggingIn) return '/dashboard';
-      return null; // no redirect needed
+      return null;
     },
     routes: [
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
@@ -47,6 +44,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/dashboard',
         builder: (context, state) => _shelled('/dashboard', const DashboardScreen()),
       ),
+
+      // --- Parcels / neighborhoods -------------------------------------------------
+      // `all` and `area/:neighborhoodId` are declared BEFORE the catch-all
+      // `:parcelId` route on purpose: go_router matches static path
+      // segments against sibling routes in declaration order, and a real
+      // parcel ID (e.g. "4471_Z12") will never collide with the literal
       GoRoute(
         path: '/parcels',
         builder: (context, state) => _shelled('/parcels', const ParcelsListScreen()),
@@ -60,6 +63,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
+
       GoRoute(
         path: '/intake/new',
         builder: (context, state) => _shelled('/intake/new', const IntakeScreen()),
@@ -67,30 +71,87 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/triage',
         builder: (context, state) => _shelled('/triage', const TriageScreen()),
+        routes: [
+          GoRoute(
+            path: ':complaintId',
+            builder: (context, state) => _shelled(
+              '/triage',
+              TriageScreen(complaintId: state.pathParameters['complaintId']),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/review',
         builder: (context, state) => _shelled('/review', const ReviewScreen()),
+        routes: [
+          GoRoute(
+            path: ':caseId',
+            builder: (context, state) => _shelled(
+              '/review',
+              ReviewScreen(caseId: state.pathParameters['caseId']),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/notices/:noticeId',
-        builder: (context, state) => _shelled('/notices', const NoticePreviewScreen()),
+        builder: (context, state) => _shelled(
+          '/notices',
+          NoticePreviewScreen(noticeId: state.pathParameters['noticeId']),
+        ),
       ),
       GoRoute(
         path: '/evacuation',
         builder: (context, state) => _shelled('/evacuation', const EvacuationScreen()),
+        routes: [
+          GoRoute(
+            path: ':decisionId',
+            builder: (context, state) => _shelled(
+              '/evacuation',
+              EvacuationScreen(decisionId: state.pathParameters['decisionId']),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/sitevisits',
         builder: (context, state) => _shelled('/sitevisits', const SiteVisitScreen()),
+        routes: [
+          GoRoute(
+            path: ':decisionId',
+            builder: (context, state) => _shelled(
+              '/sitevisits',
+              SiteVisitScreen(decisionId: state.pathParameters['decisionId']),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/assessment',
         builder: (context, state) => _shelled('/assessment', const AssessmentScreen()),
+        routes: [
+          GoRoute(
+            path: ':decisionId',
+            builder: (context, state) => _shelled(
+              '/assessment',
+              AssessmentScreen(decisionId: state.pathParameters['decisionId']),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/demolition',
         builder: (context, state) => _shelled('/demolition', const DemolitionScreen()),
+        routes: [
+          GoRoute(
+            path: ':decisionId',
+            builder: (context, state) => _shelled(
+              '/demolition',
+              DemolitionScreen(decisionId: state.pathParameters['decisionId']),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/import',
@@ -108,9 +169,6 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
-/// Bridges Riverpod's [authStateChangesProvider] stream to a [Listenable]
-/// go_router can watch, so sign-in/sign-out immediately re-runs `redirect`
-/// above without needing any screen to manually call `context.go`.
 class _AuthRefreshNotifier extends ChangeNotifier {
   _AuthRefreshNotifier(Ref ref) {
     ref.listen(authStateChangesProvider, (_, __) => notifyListeners());

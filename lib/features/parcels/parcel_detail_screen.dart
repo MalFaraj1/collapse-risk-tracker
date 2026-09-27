@@ -1,333 +1,365 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
 import '../../app/theme/app_colors.dart';
-import '../../core/constants/roles.dart';
-import '../../core/widgets/app_button.dart';
+import '../../app/theme/app_typography.dart';
+import '../../core/utils/error_utils.dart';
+import '../../core/widgets/app_alert.dart';
 import '../../core/widgets/app_card.dart';
+import '../../core/widgets/google_map_card.dart';
+import '../../core/widgets/media_thumbnail.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../core/widgets/timeline_rail.dart';
-import '../auth/auth_providers.dart';
-import 'models/building.dart';
-import 'models/parcel.dart';
-import 'models/parcel_attachment.dart';
-import 'providers/parcels_providers.dart';
-import 'widgets/add_building_dialog.dart';
-import 'widgets/attachment_upload_button.dart';
-import 'widgets/edit_address_dialog.dart';
+import '../intake/models/parcel.dart';
+import 'data/parcels_repository.dart';
 
-/// Parcel detail & timeline (§5.1, FR-PAR-3) — fully wired to Firestore for
-/// everything the Parcels feature itself owns: the parcel record, its
-/// buildings, its attachments, and the read-only prior-cases check (BR-3).
+/// Parcel Detail — "تفاصيل العقار" (§7.2, FR-PAR-2/3/4).
 ///
-/// The timeline currently includes real events from those three sources
-/// only. As Intake, Review, Actions, etc. are built, extend
-/// [_buildTimelineItems] below to merge in their collections too — see the
-/// TODO comment at the bottom of that function for the exact pattern to
-/// follow. This screen deliberately does not fabricate placeholder entries
-/// for features that don't exist yet.
-class ParcelDetailScreen extends ConsumerWidget {
+/// Shows the parcel's own data plus a merged chronological timeline of
+/// its cases, complaints, decisions, and notices. Every field Intake
+/// saves on a complaint — channel, narrative, contact info, and every
+/// attached photo/video — is shown here, not just the narrative. The
+/// location card links out to real Google Maps for directions, using the
+/// same [GoogleMapCard] component built for exactly this purpose.
+class ParcelDetailScreen extends ConsumerStatefulWidget {
   const ParcelDetailScreen({super.key, required this.parcelId});
 
   final String parcelId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final parcelAsync = ref.watch(parcelProvider(parcelId));
-
-    return parcelAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (err, _) => AppEmptyState(icon: Icons.error_outline, title: 'تعذّر تحميل بيانات العقار', description: err.toString()),
-      data: (parcel) {
-        if (parcel == null) {
-          return const AppEmptyState(icon: Icons.search_off, title: 'العقار غير موجود', description: 'قد يكون الرابط غير صحيح أو تم حذفه.');
-        }
-        return _ParcelDetailBody(parcel: parcel);
-      },
-    );
-  }
+  ConsumerState<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
 }
 
-class _ParcelDetailBody extends ConsumerWidget {
-  const _ParcelDetailBody({required this.parcel});
-  final Parcel parcel;
+class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
+  bool _loading = true;
+  String? _loadError;
+  Parcel? _parcel;
+  List<ParcelTimelineEntry> _timeline = [];
+
+  ParcelsRepository get _repo => ref.read(parcelsRepositoryProvider);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final buildingsAsync = ref.watch(parcelBuildingsProvider(parcel.id));
-    final attachmentsAsync = ref.watch(parcelAttachmentsProvider(parcel.id));
-    final priorCasesAsync = ref.watch(parcelPriorCasesProvider(parcel.id));
-    final roleAsync = ref.watch(currentUserRoleProvider);
-    final canEdit = {AppRole.callCenter, AppRole.engineering, AppRole.admin}.contains(roleAsync.valueOrNull);
+  void initState() {
+    super.initState();
+    _load();
+  }
 
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Text('${parcel.parcelNo}-${parcel.cadastralZone}', style: Theme.of(context).textTheme.headlineMedium),
-                      const SizedBox(width: 10),
-                      StatusBadge(status: parcel.status),
-                    ]),
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      Expanded(child: Text(parcel.address, style: const TextStyle(fontSize: 13, color: AppColors.textMuted))),
-                      if (canEdit)
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.textMuted),
-                          tooltip: 'تعديل العنوان',
-                          onPressed: () => EditAddressDialog.show(context, parcelId: parcel.id, currentAddress: parcel.address),
-                        ),
-                    ]),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          LayoutBuilder(builder: (context, constraints) {
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    try {
+      final parcel = await _repo.getParcel(widget.parcelId);
+      if (parcel == null) {
+        if (mounted) {
+          setState(() {
+            _loadError = 'العقار غير موجود.';
+            _loading = false;
+          });
+        }
+        return;
+      }
+      final timeline = await _repo.getTimeline(widget.parcelId);
+      if (!mounted) return;
+      setState(() {
+        _parcel = parcel;
+        _timeline = timeline;
+        _loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loadError = describeFirebaseError(e, 'تعذّر تحميل بيانات العقار');
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Padding(padding: EdgeInsets.all(60), child: Center(child: CircularProgressIndicator()));
+    }
+    if (_loadError != null || _parcel == null) {
+      return AppCard(child: AppAlert(kind: AppAlertKind.danger, title: 'تعذّر التحميل', message: _loadError ?? ''));
+    }
+
+    final parcel = _parcel!;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildHero(parcel),
+        const SizedBox(height: 20),
+        LayoutBuilder(
+          builder: (context, constraints) {
             final isWide = constraints.maxWidth > 900;
-
-            final timeline = AppCardWithHeader(
-              title: 'الخط الزمني للحالة',
-              icon: Icons.timeline_outlined,
-              contentPadding: const EdgeInsets.all(20),
-              child: buildingsAsync.when(
-                loading: () => const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
-                error: (e, _) => Text('تعذّر تحميل الخط الزمني: $e'),
-                data: (buildings) => attachmentsAsync.when(
-                  loading: () => const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
-                  error: (e, _) => Text('تعذّر تحميل الخط الزمني: $e'),
-                  data: (attachments) {
-                    final items = _buildTimelineItems(parcel, buildings, attachments);
-                    if (items.isEmpty) {
-                      return const AppEmptyState(icon: Icons.timeline_outlined, title: 'لا توجد أحداث بعد');
-                    }
-                    return TimelineRail(items: items);
-                  },
-                ),
-              ),
-            );
-
-            final side = Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            final infoPanel = _buildInfoPanel(parcel);
+            final timelinePanel = _buildTimelinePanel();
+            if (!isWide) return Column(children: [infoPanel, const SizedBox(height: 18), timelinePanel]);
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        const Text('المباني', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
-                        const Spacer(),
-                        if (canEdit)
-                          IconButton(
-                            icon: const Icon(Icons.add_circle_outline, size: 18, color: AppColors.navy),
-                            tooltip: 'إضافة مبنى',
-                            onPressed: () => AddBuildingDialog.show(context, parcelId: parcel.id),
-                          ),
-                      ]),
-                      const SizedBox(height: 6),
-                      buildingsAsync.when(
-                        loading: () => const LinearProgressIndicator(),
-                        error: (e, _) => Text('خطأ: $e', style: const TextStyle(fontSize: 12, color: AppColors.danger)),
-                        data: (buildings) {
-                          if (buildings.isEmpty) {
-                            return const Text('لا توجد مبانٍ مسجّلة بعد.', style: TextStyle(fontSize: 12, color: AppColors.textMuted));
-                          }
-                          return Column(
-                            children: buildings
-                                .map((b) => Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 4),
-                                      child: Row(children: [
-                                        const Icon(Icons.apartment, size: 15, color: AppColors.textMuted),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          b.floors != null ? '${b.floors} طوابق${b.description != null ? " — ${b.description}" : ""}' : (b.description ?? 'مبنى'),
-                                          style: const TextStyle(fontSize: 12.5),
-                                        ),
-                                      ]),
-                                    ))
-                                .toList(),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        Text('المرفقات', style: Theme.of(context).textTheme.titleMedium),
-                        const Spacer(),
-                        AttachmentUploadButton(parcelId: parcel.id),
-                      ]),
-                      const SizedBox(height: 10),
-                      attachmentsAsync.when(
-                        loading: () => const LinearProgressIndicator(),
-                        error: (e, _) => Text('خطأ: $e', style: const TextStyle(fontSize: 12, color: AppColors.danger)),
-                        data: (attachments) {
-                          if (attachments.isEmpty) {
-                            return const Text('لا توجد مرفقات بعد.', style: TextStyle(fontSize: 12, color: AppColors.textMuted));
-                          }
-                          return Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: attachments
-                                .map((a) => _AttachmentThumb(key: ValueKey(a.id), attachment: a))
-                                .toList(),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                priorCasesAsync.when(
-                  loading: () => const SizedBox.shrink(),
-                  error: (e, _) => const SizedBox.shrink(),
-                  data: (cases) => AppCard(
-                    backgroundColor: AppColors.iceTint,
-                    borderColor: AppColors.ice,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('حالات سابقة على هذا العقار', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
-                        const SizedBox(height: 8),
-                        if (cases.isEmpty)
-                          const Text(
-                            'لا توجد حالات سابقة مغلقة على هذا العقار. هذه أول حالة مسجّلة (BR-3).',
-                            style: TextStyle(fontSize: 12, color: AppColors.textBody, height: 1.6),
-                          )
-                        else
-                          Column(
-                            children: cases
-                                .map((c) => Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 3),
-                                      child: Text(
-                                        '${c.id} — ${c.status}${c.lastUpdatedAt != null ? " — ${_formatDate(c.lastUpdatedAt!)}" : ""}',
-                                        style: const TextStyle(fontSize: 12, color: AppColors.textBody),
-                                      ),
-                                    ))
-                                .toList(),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
+                Expanded(child: infoPanel),
+                const SizedBox(width: 18),
+                Expanded(flex: 2, child: timelinePanel),
               ],
             );
+          },
+        ),
+      ],
+    );
+  }
 
-            if (isWide) {
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [Expanded(flex: 2, child: timeline), const SizedBox(width: 18), Expanded(child: side)],
-              );
-            }
-            return Column(children: [timeline, const SizedBox(height: 18), side]);
-          }),
+  /// The page's anchor: a navy banner carrying the parcel's identity (ID +
+  /// status), its address, and a row of quick-glance facts, so the key
+  /// information reads before the user scrolls into the detail panels.
+  Widget _buildHero(Parcel parcel) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: const LinearGradient(
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+          colors: [AppColors.navy, AppColors.navy3],
+        ),
+        boxShadow: const [BoxShadow(color: Color(0x261B2A4A), blurRadius: 24, offset: Offset(0, 8))],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          // Soft decorative glyph so the banner doesn't read as a flat slab.
+          PositionedDirectional(
+            end: -24,
+            bottom: -36,
+            child: Icon(Icons.domain, size: 160, color: Colors.white.withOpacity(0.05)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Material(
+                      color: Colors.white.withOpacity(0.1),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => context.go('/parcels'),
+                        child: const SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Icon(Icons.arrow_forward, size: 18, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'تفاصيل العقار',
+                            style: TextStyle(fontSize: 12, color: AppColors.ice, fontWeight: FontWeight.w600, letterSpacing: 0.3),
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 12,
+                            runSpacing: 8,
+                            children: [
+                              Text(parcel.id, style: AppTypography.mono(fontSize: 24, weight: FontWeight.w800, color: Colors.white)),
+                              StatusBadge(status: parcel.status),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(Icons.place_outlined, size: 15, color: AppColors.gold),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  parcel.address.isEmpty ? 'لا يوجد عنوان مسجَّل' : parcel.address,
+                                  style: const TextStyle(fontSize: 13.5, color: AppColors.ice),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    _heroChip(Icons.tag, 'رقم العقار', parcel.parcelNo),
+                    _heroChip(Icons.map_outlined, 'المنطقة العقارية', parcel.cadastralZone),
+                    _heroChip(Icons.history, 'السجلات', _timeline.length.toString()),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  /// Merges every real timeline source this feature currently owns, sorted
-  /// chronologically. Returns an empty list gracefully if timestamps are
-  /// still resolving (serverTimestamp() reads as null until the server
-  /// round-trip completes) rather than crashing on a null comparison.
-  List<TimelineRailItem> _buildTimelineItems(Parcel parcel, List<Building> buildings, List<ParcelAttachment> attachments) {
-    final events = <(DateTime, TimelineRailItem)>[];
-
-    if (parcel.createdAt != null) {
-      events.add((
-        parcel.createdAt!,
-        TimelineRailItem(
-          state: RailItemState.done,
-          icon: Icons.add_home_outlined,
-          title: 'تم إنشاء سجلّ العقار',
-          timestamp: _formatDateTime(parcel.createdAt!),
+  Widget _heroChip(IconData icon, String label, String value) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withOpacity(0.12)),
         ),
-      ));
-    }
-
-    for (final b in buildings) {
-      if (b.createdAt == null) continue;
-      events.add((
-        b.createdAt!,
-        TimelineRailItem(
-          state: RailItemState.done,
-          icon: Icons.apartment_outlined,
-          title: 'تمت إضافة مبنى',
-          timestamp: _formatDateTime(b.createdAt!),
-          body: b.floors != null ? '${b.floors} طوابق' : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: AppColors.gold),
+            const SizedBox(width: 6),
+            Text('$label: ', style: const TextStyle(fontSize: 12, color: AppColors.ice)),
+            Text(
+              value.isEmpty ? '—' : value,
+              style: AppTypography.mono(fontSize: 12.5, weight: FontWeight.w700, color: Colors.white),
+            ),
+          ],
         ),
-      ));
-    }
+      );
 
-    for (final a in attachments) {
-      if (a.uploadedAt == null) continue;
-      events.add((
-        a.uploadedAt!,
-        TimelineRailItem(
-          state: RailItemState.done,
-          icon: a.type == AttachmentType.pdf ? Icons.picture_as_pdf_outlined : Icons.image_outlined,
-          title: 'تم رفع مرفق',
-          timestamp: _formatDateTime(a.uploadedAt!),
-          body: a.fileName,
-        ),
-      ));
-    }
-
-    events.sort((x, y) => x.$1.compareTo(y.$1));
-
-    // TODO(Phase 3): as each feature below is built, merge its collection in
-    // here the same way — fetch via its own StreamProvider.family(parcel.id
-    // or case id), map each doc to a TimelineRailItem, add to `events`
-    // before the final sort. Do this for: complaints, reports, reviews,
-    // decisions, notices, evacuationExecutions, siteVisits, assessments,
-    // restorationStudies, demolitionOrders. Mark the most recent unresolved
-    // one as RailItemState.current and everything after it as .pending, to
-    // match this screen's original design intent.
-
-    return events.map((e) => e.$2).toList();
-  }
-
-  String _formatDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  String _formatDateTime(DateTime d) =>
-      '${_formatDate(d)} · ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-}
-
-class _AttachmentThumb extends StatelessWidget {
-  const _AttachmentThumb({super.key, required this.attachment});
-  final ParcelAttachment attachment;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: attachment.fileName,
-      child: InkWell(
-        onTap: () {
-          // Opens the file in a new browser tab on Flutter Web. On other
-          // platforms, replace with a package like url_launcher.
-        },
-        child: Container(
-          width: 64,
-          height: 64,
-          decoration: BoxDecoration(color: AppColors.navy2, borderRadius: BorderRadius.circular(9)),
-          child: Icon(
-            attachment.type == AttachmentType.pdf ? Icons.picture_as_pdf : Icons.image,
-            color: AppColors.ice,
+  Widget _buildInfoPanel(Parcel parcel) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AppCardWithHeader(
+          title: 'بيانات العقار',
+          icon: Icons.badge_outlined,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+            child: Column(
+              children: [
+                _kv(Icons.tag, 'رقم العقار', parcel.parcelNo),
+                _kv(Icons.map_outlined, 'المنطقة العقارية', parcel.cadastralZone),
+                _kv(Icons.event_outlined, 'تاريخ الإنشاء', parcel.createdAt == null ? '—' : _fmt(parcel.createdAt!)),
+                _kv(Icons.update_outlined, 'آخر تحديث', parcel.updatedAt == null ? '—' : _fmt(parcel.updatedAt!), isLast: true),
+              ],
+            ),
           ),
         ),
+        const SizedBox(height: 16),
+        AppCardWithHeader(
+          title: 'الموقع',
+          icon: Icons.map_outlined,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: parcel.hasLocation
+                ? GoogleMapCard(
+                    latitude: parcel.latitude!,
+                    longitude: parcel.longitude!,
+                    markerLabel: parcel.address.isEmpty ? parcel.id : parcel.address,
+                  )
+                : const NoLocationPlaceholder(canSetLocation: false, onSetLocation: _noop),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static void _noop() {}
+
+  Widget _buildTimelinePanel() {
+    return AppCardWithHeader(
+      title: 'الخط الزمني للعقار',
+      icon: Icons.history,
+      trailing: _timeline.isEmpty ? null : '${_timeline.length} سجل',
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: _timeline.isEmpty
+            ? const AppEmptyState(
+                icon: Icons.history_toggle_off,
+                title: 'لا يوجد سجلّ بعد',
+                description: 'ستظهر هنا الشكاوى والحالات والقرارات والإشعارات المرتبطة بهذا العقار فور تسجيلها.',
+              )
+            : TimelineRail(
+                items: _timeline
+                    .map((e) => TimelineRailItem(
+                          state: RailItemState.done,
+                          icon: e.icon,
+                          title: e.title,
+                          body: e.subtitle,
+                          meta: _fmt(e.timestamp),
+                          trailing: _buildEntryExtra(e),
+                        ))
+                    .toList(),
+              ),
       ),
     );
   }
+
+  /// Renders everything Intake saved on a complaint that a plain
+  /// title/body/meta row can't express: the complainant's contact info
+  /// and every photo/video attached to it. Returns null for non-complaint
+  /// entries (no contact, no media), so they render exactly as before.
+  Widget? _buildEntryExtra(ParcelTimelineEntry e) {
+    final hasContact = e.complainantContact != null && e.complainantContact!.trim().isNotEmpty;
+    final hasMedia = e.mediaUrls.isNotEmpty;
+    if (!hasContact && !hasMedia) return null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasContact)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.call_outlined, size: 13, color: AppColors.textMuted),
+                const SizedBox(width: 5),
+                Text('جهة الاتصال: ${e.complainantContact}', style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
+              ],
+            ),
+          ),
+        if (hasMedia)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (final url in e.mediaUrls) MediaThumbnail(url: url, size: 64)],
+          ),
+      ],
+    );
+  }
+
+  Widget _kv(IconData icon, String k, String v, {bool isLast = false}) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        decoration: BoxDecoration(
+          border: isLast ? null : const Border(bottom: BorderSide(color: AppColors.border, width: 1)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(color: AppColors.iceTint, borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, size: 15, color: AppColors.navy3),
+            ),
+            const SizedBox(width: 10),
+            Text(k, style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Flexible(
+              child: Text(v.isEmpty ? '—' : v,
+                  textAlign: TextAlign.end,
+                  style: AppTypography.mono(fontSize: 12.5, weight: FontWeight.w700, color: AppColors.text)),
+            ),
+          ],
+        ),
+      );
+
+  String _fmt(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }

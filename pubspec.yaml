@@ -1,12 +1,10 @@
 name: collapse_risk_tracker
-description: >
-  Collapse-Risk Building Follow-Up System — Municipality of Tripoli.
-  Internal Flutter Web application backed by Firebase (Auth, Firestore, Storage).
-publish_to: 'none'
+description: Collapse-Risk Building Follow-Up System — Municipality of Tripoli.
+publish_to: "none"
 version: 0.1.0
 
 environment:
-  sdk: '>=3.4.0 <4.0.0'
+  sdk: ">=3.4.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -14,37 +12,27 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
-  # --- Firebase -------------------------------------------------------------
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.4.3
   firebase_storage: ^12.3.2
 
-  # --- State management -------------------------------------------------------
-  # Riverpod chosen deliberately (see docs/ARCHITECTURE.md for the reasoning):
-  # compile-safe DI, first-class support for Firestore/Auth Streams via
-  # StreamProvider, and testable without a BuildContext.
   flutter_riverpod: ^2.5.1
-
-  # --- Routing -----------------------------------------------------------------
-  # go_router chosen for URL-based routing on Flutter Web (shareable/bookmarkable
-  # links like /parcels/PARCEL-4471-Z12) and built-in redirect/auth-guard support.
   go_router: ^14.2.7
-
-  # --- Typography ----------------------------------------------------------------
-  # Cairo (Arabic UI) + JetBrains Mono (reference numbers/IDs), matching the
-  # approved design prototype — fetched once and cached, no manual font files.
   google_fonts: ^6.2.1
 
-  # --- Utilities --------------------------------------------------------------------
-  # NOTE: flutter_localizations (above) pins its own compatible intl version.
-  # If `flutter pub get` reports a version conflict on intl, remove the
-  # explicit constraint below and let it resolve to whatever
-  # flutter_localizations requires for your Flutter SDK version.
+  # Added for the fully-functional Parcels screen:
+  google_maps_flutter: ^2.9.0 # location display (lat/lng map + marker)
+  url_launcher: ^6.3.0 # "Open in Google Maps" external link
+  file_picker: ^8.1.2 # already in use by the team's attachment upload
+
   intl: ^0.19.0
   equatable: ^2.0.5
-
   cupertino_icons: ^1.0.8
+  image_picker: ^1.1.2
+  video_player: ^2.9.2
+  pdf: ^3.11.1
+  excel: ^4.0.6
 
 dev_dependencies:
   flutter_test:
@@ -53,3 +41,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/fonts/Cairo-Regular.ttf
+    - assets/fonts/Cairo-Bold.ttf
