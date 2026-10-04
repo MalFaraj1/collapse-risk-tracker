@@ -37,6 +37,7 @@ class Complaint {
     this.createdAt,
     required this.createdByUid,
     this.triagedAt,
+    this.updatedAt,
   });
 
   final String id;
@@ -55,6 +56,12 @@ class Complaint {
   /// documents) means no triage has been submitted yet. Drafts don't set it.
   final DateTime? triagedAt;
 
+  /// Set only when the complaint has been edited after its initial
+  /// submission — null on a never-edited complaint. Purely informational
+  /// (e.g. an optional "last edited" note in the UI); nothing currently
+  /// branches on it.
+  final DateTime? updatedAt;
+
   bool get needsTriage => triagedAt == null;
 
   factory Complaint.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -71,6 +78,7 @@ class Complaint {
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
       createdByUid: data['createdByUid'] as String? ?? '',
       triagedAt: (data['triagedAt'] as Timestamp?)?.toDate(),
+      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -84,5 +92,21 @@ class Complaint {
         'photoUrls': photoUrls,
         'createdAt': FieldValue.serverTimestamp(),
         'createdByUid': createdByUid,
+      };
+
+  /// Fields an edit is allowed to change. Deliberately excludes
+  /// `caseId`, `parcelId`, `createdAt`, `createdByUid`, `triagedAt`, and
+  /// — per your explicit instruction — `photoUrls`: editing a complaint's
+  /// text/channel/date/contact never moves it to a different case or
+  /// parcel, rewrites who first logged it or when, un-triages it, or
+  /// touches its existing photos. Used with Firestore's partial
+  /// `.update()`, not `.set()`, so any key left out of this map is simply
+  /// never touched on the stored document.
+  Map<String, dynamic> toFirestoreUpdate() => {
+        'date': Timestamp.fromDate(date),
+        'channel': channel.firestoreValue,
+        'narrative': narrative,
+        'complainantContact': complainantContact,
+        'updatedAt': FieldValue.serverTimestamp(),
       };
 }

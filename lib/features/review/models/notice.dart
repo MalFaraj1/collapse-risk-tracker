@@ -31,6 +31,7 @@ class Notice {
     this.pdfUrl,
     this.postedDate,
     this.createdAt,
+    this.reference,
   });
 
   final String id;
@@ -48,15 +49,20 @@ class Notice {
   /// notice it confirms. Null for every other notice type.
   final String? linkedWarningNoticeId;
 
-  /// Null until a server-side process (a Cloud Function — not yet built in
-  /// this project) actually renders the PDF. The Notice Preview screen
-  /// must treat a null pdfUrl as "generation pending," not as an error —
-  /// see FR-ACT-2: the PDF is always generated server-side, never on the
-  /// client, so this field legitimately starts empty.
+  /// Null until the PDF has actually been generated. No Cloud Function
+  /// infrastructure exists in this project, so generation is client-
+  /// triggered on first view (Notice Preview) rather than server-side as
+  /// §8 describes — a disclosed deviation, not an oversight. The Notice
+  /// Preview screen must treat a null pdfUrl as "not yet generated," not
+  /// as an error.
   final String? pdfUrl;
 
   final DateTime? postedDate;
   final DateTime? createdAt;
+
+  /// The paper reference number from the legacy record — only ever set on
+  /// notices with [NoticeSource.imported] (FR-IMP-1: reference is optional).
+  final String? reference;
 
   factory Notice.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
@@ -72,6 +78,7 @@ class Notice {
       pdfUrl: data['pdfUrl'] as String?,
       postedDate: (data['postedDate'] as Timestamp?)?.toDate(),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      reference: data['reference'] as String?,
     );
   }
 

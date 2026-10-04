@@ -210,7 +210,6 @@ class _EvacuationScreenState extends ConsumerState<EvacuationScreen> {
       return AppCard(child: AppAlert(kind: AppAlertKind.danger, title: 'تعذّر التحميل', message: _loadError ?? ''));
     }
 
-    final decision = _decision!;
     final execution = _execution!;
 
     return Column(

@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
@@ -27,6 +26,16 @@ import 'models/parcel.dart';
 /// scrolling to any part of the form. The only real gate is the final
 /// submit button, which requires a resolved parcel and a non-empty
 /// narrative.
+///
+/// EDIT-IN-PLACE (added): if searching a parcel finds an existing
+/// complaint that hasn't been triaged yet, this screen resumes editing
+/// that complaint instead of starting a blank one. Saving then updates
+/// that same document rather than creating a new one — see
+/// [IntakeRepository.updateComplaint]. This is deliberately scoped to
+/// not-yet-triaged complaints only: once a complaint has been triaged,
+/// its content was the basis for a real decision already made, and
+/// silently rewriting it after the fact would be a correctness problem,
+/// not a convenience.
 class IntakeScreen extends ConsumerStatefulWidget {
   const IntakeScreen({super.key});
 
@@ -61,6 +70,18 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
   ComplaintChannel _channel = ComplaintChannel.phone;
   final List<PlatformFile> _photos = [];
 
+  /// Non-null when the parcel search found a not-yet-triaged complaint —
+  /// the form above is pre-filled from it, and saving will update this
+  /// document instead of creating a new one. Null means the form will
+  /// create a brand-new complaint on save, exactly as before.
+  Complaint? _editingComplaint;
+
+  /// Read-only reference to the photos already saved on [_editingComplaint]
+  /// — shown so the user can see what's attached, but never removable or
+  /// re-uploaded from this screen. Empty whenever [_editingComplaint] is
+  /// null.
+  List<String> _existingPhotoUrls = [];
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +114,21 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
 
   IntakeRepository get _repo => ref.read(intakeRepositoryProvider);
 
+  /// Resets the complaint-DETAIL fields to a blank slate — channel, date,
+  /// narrative, contact, in-progress photo picks, and the "editing"
+  /// state. Does NOT touch parcel selection; shared by both a full parcel
+  /// reset and the "log a new, separate complaint instead" opt-out.
+  void _clearComplaintDetailFields() {
+    _editingComplaint = null;
+    _existingPhotoUrls = [];
+    _channel = ComplaintChannel.phone;
+    _complaintDate = DateTime.now();
+    _dateController.text = _fmt(_complaintDate);
+    _narrativeController.clear();
+    _contactController.clear();
+    _photos.clear();
+  }
+
   Future<void> _searchParcel() async {
     if (_parcelNoController.text.trim().isEmpty || _zoneController.text.trim().isEmpty) {
       setState(() => _error = 'الرجاء إدخال رقم العقار والمنطقة العقارية.');
@@ -108,6 +144,7 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
       _latitude = null;
       _longitude = null;
       _mapKeySeed++;
+      _clearComplaintDetailFields();
     });
     try {
       final parcel = await _repo.findParcel(
@@ -128,6 +165,14 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
         final history = await _repo.getCaseHistory(parcel.id);
         final complaints = await _repo.getComplaintHistory(parcel.id);
         if (!mounted) return;
+
+        // EDIT-IN-PLACE: if the most recent complaint on this parcel
+        // hasn't been triaged yet, resume editing it instead of starting
+        // a blank form — this is the fix for "editing" silently creating
+        // a duplicate complaint. A complaint that's already been triaged
+        // is left alone; its content already fed a real triage decision.
+        final pending = complaints.isNotEmpty && complaints.first.needsTriage ? complaints.first : null;
+
         setState(() {
           _resolvedParcel = parcel;
           _addressController.text = parcel.address;
@@ -135,6 +180,16 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
           _priorComplaints = complaints;
           _latitude = parcel.latitude;
           _longitude = parcel.longitude;
+
+          if (pending != null) {
+            _editingComplaint = pending;
+            _existingPhotoUrls = pending.photoUrls;
+            _channel = pending.channel;
+            _complaintDate = pending.date;
+            _dateController.text = _fmt(pending.date);
+            _narrativeController.text = pending.narrative;
+            _contactController.text = pending.complainantContact ?? '';
+          }
         });
       }
     } catch (e) {
@@ -154,7 +209,16 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
       _latitude = null;
       _longitude = null;
       _mapKeySeed++;
+      _clearComplaintDetailFields();
     });
+  }
+
+  /// Opt-out for the (expected to be rare) case where a pending complaint
+  /// was found but the user genuinely wants to log a second, separate one
+  /// on the same parcel right now — without this, edit-in-place would
+  /// quietly take away the ability to do that at all.
+  void _startNewComplaintInstead() {
+    setState(_clearComplaintDetailFields);
   }
 
   Future<void> _pickPhotos() async {
@@ -202,30 +266,46 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
       _error = null;
     });
     try {
-      // FR-INT-2: create the parcel first if this is a new one.
-      final parcel = _resolvedParcel ??
-          await _repo.createParcel(
-            parcelNo: _parcelNoController.text,
-            cadastralZone: _zoneController.text,
-            address: _addressController.text,
-            latitude: _latitude,
-            longitude: _longitude,
-          );
+      final editing = _editingComplaint;
+      if (editing != null) {
+        // Editing an existing, not-yet-triaged complaint: update it in
+        // place. No parcel/case write is needed at all — those already
+        // exist and aren't changing.
+        await _repo.updateComplaint(
+          complaintId: editing.id,
+          date: _complaintDate,
+          channel: _channel,
+          narrative: _narrativeController.text.trim(),
+          complainantContact:
+              _contactController.text.trim().isEmpty ? null : _contactController.text.trim(),
+          newPhotos: _photos,
+        );
+      } else {
+        // FR-INT-2: create the parcel first if this is a new one.
+        final parcel = _resolvedParcel ??
+            await _repo.createParcel(
+              parcelNo: _parcelNoController.text,
+              cadastralZone: _zoneController.text,
+              address: _addressController.text,
+              latitude: _latitude,
+              longitude: _longitude,
+            );
 
-      // BR-2, enforced atomically — see IntakeRepository for why this must
-      // be a transaction rather than a query-then-write.
-      final caseId = await _repo.getOrCreateOpenCaseId(parcel.id);
+        // BR-2, enforced atomically — see IntakeRepository for why this must
+        // be a transaction rather than a query-then-write.
+        final caseId = await _repo.getOrCreateOpenCaseId(parcel.id);
 
-      await _repo.submitComplaint(
-        caseId: caseId,
-        parcelId: parcel.id,
-        date: _complaintDate,
-        channel: _channel,
-        narrative: _narrativeController.text.trim(),
-        complainantContact:
-            _contactController.text.trim().isEmpty ? null : _contactController.text.trim(),
-        photos: _photos,
-      );
+        await _repo.submitComplaint(
+          caseId: caseId,
+          parcelId: parcel.id,
+          date: _complaintDate,
+          channel: _channel,
+          narrative: _narrativeController.text.trim(),
+          complainantContact:
+              _contactController.text.trim().isEmpty ? null : _contactController.text.trim(),
+          photos: _photos,
+        );
+      }
 
       if (!mounted) return;
       context.go('/dashboard');
@@ -271,9 +351,9 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
   }
 
   /// The entire form, top to bottom, exactly as laid out in the approved
-  /// design: parcel search → BR-3 alert (if applicable) → address →
-  /// location map → divider → channel/date → narrative → contact →
-  /// photos → actions.
+  /// design: parcel search → BR-3 alert (if applicable) → edit-in-place
+  /// banner (if applicable) → address → location map → divider →
+  /// channel/date → narrative → contact → photos → actions.
   Widget _buildForm() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -332,6 +412,25 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
             message:
                 'عُثر على ${_priorCases.length == 1 ? "حالة واحدة سابقة" : "${_priorCases.length} حالات سابقة"} '
                 '— طالع القائمة الجانبية قبل المتابعة لتفادي تكرار المعلومات.',
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (_editingComplaint != null) ...[
+          AppAlert(
+            kind: AppAlertKind.info,
+            title: 'يوجد بلاغ قيد الانتظار لم يُفرز بعد',
+            message: 'تُعدَّل بيانات هذا البلاغ أدناه، ولن يُنشأ بلاغ جديد عند الحفظ — سيُحدَّث البلاغ نفسه.',
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: _busy ? null : _startNewComplaintInstead,
+                icon: const Icon(Icons.add_comment_outlined, size: 16),
+                label: const Text('تسجيل بلاغ جديد منفصل بدلًا من ذلك'),
+              ),
+            ),
           ),
           const SizedBox(height: 16),
         ],
@@ -426,9 +525,22 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
             decoration: const InputDecoration(labelText: 'معلومات التواصل مع المُبلّغ (اختياري)'),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'الصور المرفقة',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: AppColors.text),
+          if (_existingPhotoUrls.isNotEmpty) ...[
+            const Text(
+              'الصور المرفقة حاليًا (لا يمكن حذفها من هنا)',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: AppColors.text),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [for (final url in _existingPhotoUrls) _networkPhotoThumbnail(url)],
+            ),
+            const SizedBox(height: 16),
+          ],
+          Text(
+            _existingPhotoUrls.isNotEmpty ? 'إضافة صور جديدة' : 'الصور المرفقة',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: AppColors.text),
           ),
           const SizedBox(height: 8),
           _photoPicker(),
@@ -443,7 +555,9 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
               ),
               const SizedBox(width: 10),
               AppButton(
-                label: _busy ? 'جارٍ الحفظ...' : 'حفظ وفتح الحالة',
+                label: _busy
+                    ? 'جارٍ الحفظ...'
+                    : (_editingComplaint != null ? 'حفظ التعديلات' : 'حفظ وفتح الحالة'),
                 icon: Icons.check,
                 onPressed: _busy ? null : _submit,
               ),
@@ -638,13 +752,14 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
 
   /// One prior complaint's full saved content — description AND media.
   Widget _complaintHistoryCard(Complaint c) {
+    final isBeingEdited = _editingComplaint?.id == c.id;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.bg,
+        color: isBeingEdited ? AppColors.infoBg : AppColors.bg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: isBeingEdited ? AppColors.info : AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -664,6 +779,11 @@ class _IntakeScreenState extends ConsumerState<IntakeScreen> {
               Text(c.channel.label,
                   style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.textMuted)),
               const Spacer(),
+              if (isBeingEdited)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Text('قيد التعديل الآن', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.info)),
+                ),
               Text(_fmt(c.date), style: AppTypography.mono(fontSize: 11, color: AppColors.textMuted)),
             ],
           ),

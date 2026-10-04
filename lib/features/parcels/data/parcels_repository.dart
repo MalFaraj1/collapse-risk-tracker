@@ -1,22 +1,38 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/firestore_paths.dart';
 import '../../../core/constants/parcel_status.dart';
 import '../../assessment/models/assessment.dart';
+import '../../audit/data/audit_log_repository.dart';
+import '../../auth/auth_providers.dart';
 import '../../demolition/models/demolition_order.dart';
 import '../../evacuation/models/evacuation_execution.dart';
-import '../../intake/data/intake_repository.dart' show firestoreProvider;
+import '../../intake/data/intake_repository.dart' show firestoreProvider, storageProvider;
 import '../../intake/models/case.dart';
 import '../../intake/models/complaint.dart';
 import '../../intake/models/parcel.dart';
 import '../../review/models/decision.dart';
 import '../../review/models/notice.dart';
 import '../../sitevisits/models/site_visit.dart';
+import '../models/parcel_attachment.dart';
 
 final parcelsRepositoryProvider = Provider<ParcelsRepository>((ref) {
-  return ParcelsRepository(firestore: ref.watch(firestoreProvider));
+  return ParcelsRepository(
+    firestore: ref.watch(firestoreProvider),
+    storage: ref.watch(storageProvider),
+    auth: ref.watch(firebaseAuthProvider),
+    auditLog: ref.watch(auditLogRepositoryProvider),
+  );
+});
+
+/// Live attachments for one parcel, for Parcel Detail.
+final parcelAttachmentsProvider = StreamProvider.family<List<ParcelAttachment>, String>((ref, parcelId) {
+  return ref.watch(parcelsRepositoryProvider).watchAttachments(parcelId);
 });
 
 /// Everything the Parcel Registry (list + detail) needs to talk to
@@ -29,8 +45,22 @@ final parcelsRepositoryProvider = Provider<ParcelsRepository>((ref) {
 /// Review, Evacuation, Site Visit, Assessment, and Demolition all read
 /// and write the SAME simpler Parcel model this file now uses.
 class ParcelsRepository {
-  ParcelsRepository({required this.firestore});
+  /// [storage], [auth], and [auditLog] are only needed by
+  /// [uploadAttachment] and [createParcel] — everything else (reading a
+  /// parcel, its timeline, its attachment list) is pure Firestore reads.
+  /// Left nullable, rather than required, so read-only call sites that
+  /// construct this class directly instead of through
+  /// [parcelsRepositoryProvider] — e.g. ReportsRepository.buildR6, which
+  /// only ever calls getParcel/getTimeline — don't need to thread
+  /// dependencies through that they'll never use.
+  ParcelsRepository({required this.firestore, this.storage, this.auth, this.auditLog});
   final FirebaseFirestore firestore;
+  final FirebaseStorage? storage;
+  final FirebaseAuth? auth;
+  final AuditLogRepository? auditLog;
+
+  Never _missingUploadDeps() => throw StateError(
+      'ParcelsRepository was constructed without storage/auth/auditLog — use parcelsRepositoryProvider (which supplies all three) for any write, not a bare ParcelsRepository(firestore: ...).');
 
   /// Live list of every parcel, most recently updated first. A real
   /// production deployment would paginate this; for this POC's expected
@@ -61,6 +91,8 @@ class ParcelsRepository {
     required String address,
     int buildingCount = 1,
   }) async {
+    if (auth == null || auditLog == null) _missingUploadDeps();
+
     final id = Parcel.buildId(parcelNo, cadastralZone);
     final ref = firestore.collection(FirestorePaths.parcels).doc(id);
     final existing = await ref.get();
@@ -75,8 +107,96 @@ class ParcelsRepository {
       buildingCount: buildingCount,
       status: ParcelStatus.newCase,
     );
-    await ref.set(parcel.toFirestoreCreate());
+
+    final batch = firestore.batch();
+    batch.set(ref, parcel.toFirestoreCreate());
+    auditLog!.logInBatch(
+      batch,
+      parcelId: id,
+      entityType: 'PARCEL',
+      entityId: id,
+      action: 'PARCEL_CREATED',
+      summary: 'أُنشئ عقار جديد رقم ${parcel.parcelNo} — ${parcel.cadastralZone}',
+      actorUid: auth!.currentUser?.uid ?? '',
+    );
+    await batch.commit();
+
     return parcel;
+  }
+
+  // --- Parcel Detail: attachments (§7.11, FR-AUD-1) ----------------------------
+
+  String _mimeTypeFor(String extension) {
+    const imageExt = {'png': 'image/png', 'webp': 'image/webp', 'gif': 'image/gif', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'};
+    const videoExt = {'mp4': 'video/mp4', 'mov': 'video/quicktime', 'webm': 'video/webm', 'avi': 'video/x-msvideo', 'mkv': 'video/x-matroska', 'm4v': 'video/mp4'};
+    if (extension == 'pdf') return 'application/pdf';
+    return imageExt[extension] ?? videoExt[extension] ?? 'application/octet-stream';
+  }
+
+  /// Uploads one file directly to a parcel (as opposed to evidence
+  /// captured through a specific workflow step) and logs it to the audit
+  /// trail in the SAME atomic batch as the Firestore record — so an
+  /// attachment can never exist without a matching log entry, or vice
+  /// versa. Storage path matches the deployed rules exactly:
+  /// `parcels/{parcelId}/attachments/{fileName}`.
+  Future<ParcelAttachment> uploadAttachment({
+    required String parcelId,
+    required AttachmentCategory category,
+    required PlatformFile file,
+  }) async {
+    if (storage == null || auth == null || auditLog == null) _missingUploadDeps();
+
+    final bytes = file.bytes;
+    if (bytes == null) throw StateError('تعذّرت قراءة محتوى الملف.');
+
+    final docRef = firestore.collection(FirestorePaths.attachments).doc();
+    final ext = (file.extension ?? '').toLowerCase();
+    final contentType = _mimeTypeFor(ext);
+    final storageRef = storage!.ref('${FirestorePaths.parcels}/$parcelId/attachments/${docRef.id}${ext.isEmpty ? '' : '.$ext'}');
+    await storageRef.putData(bytes, SettableMetadata(contentType: contentType));
+    final url = await storageRef.getDownloadURL();
+    final uid = auth!.currentUser?.uid ?? '';
+
+    final batch = firestore.batch();
+    batch.set(docRef, {
+      'parcelId': parcelId,
+      'url': url,
+      'fileName': file.name,
+      'contentType': contentType,
+      'category': category.firestoreValue,
+      'uploaderUid': uid,
+      'uploadedAt': FieldValue.serverTimestamp(),
+    });
+    auditLog!.logInBatch(
+      batch,
+      parcelId: parcelId,
+      entityType: 'ATTACHMENT',
+      entityId: docRef.id,
+      action: 'ATTACHMENT_UPLOADED',
+      summary: 'أُرفق ملف (${category.label}): ${file.name}',
+      actorUid: uid,
+    );
+    await batch.commit();
+
+    return ParcelAttachment(
+      id: docRef.id,
+      parcelId: parcelId,
+      url: url,
+      fileName: file.name,
+      contentType: contentType,
+      category: category,
+      uploaderUid: uid,
+    );
+  }
+
+  /// Every attachment on one parcel, newest first.
+  Stream<List<ParcelAttachment>> watchAttachments(String parcelId) {
+    return firestore
+        .collection(FirestorePaths.attachments)
+        .where('parcelId', isEqualTo: parcelId)
+        .orderBy('uploadedAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map(ParcelAttachment.fromFirestore).toList());
   }
 
   // --- Parcel Detail: the full timeline (FR-PAR-3) ----------------------------
@@ -204,6 +324,7 @@ class ParcelsRepository {
           subtitle: c.narrative.isEmpty ? '(لا يوجد وصف)' : c.narrative,
           complainantContact: c.complainantContact,
           mediaUrls: c.photoUrls,
+          actorUid: c.createdByUid,
         ),
       for (final d in decisions)
         ParcelTimelineEntry(
@@ -211,13 +332,15 @@ class ParcelsRepository {
           icon: Icons.gavel_outlined,
           title: 'قرار — ${d.action.noticeTitle}',
           subtitle: 'تاريخ التنفيذ: ${_fmt(d.executionDate)}',
+          actorUid: d.createdByUid,
         ),
       for (final n in notices)
         ParcelTimelineEntry(
           timestamp: n.createdAt ?? DateTime.now(),
-          icon: Icons.description_outlined,
-          title: 'إشعار صادر',
-          subtitle: n.source.firestoreValue,
+          icon: n.source == NoticeSource.imported ? Icons.history_edu_outlined : Icons.description_outlined,
+          title: n.source == NoticeSource.imported ? 'إنذار سابق (مستورد)' : 'إشعار صادر',
+          subtitle: DecisionAction.fromFirestore(n.type).noticeTitle +
+              ((n.reference == null || n.reference!.isEmpty) ? '' : ' — مرجع: ${n.reference}'),
           noticeId: n.id,
         ),
       for (final e in evacuations) ..._evacuationEntries(e),
@@ -228,6 +351,7 @@ class ParcelsRepository {
           title: 'زيارة ميدانية — ${v.outcome.label}',
           subtitle: (v.notes == null || v.notes!.isEmpty) ? v.outcome.subtitle : v.notes!,
           mediaUrls: v.mediaUrls,
+          actorUid: v.inspectorUid,
         ),
       for (final a in assessments)
         ParcelTimelineEntry(
@@ -260,11 +384,11 @@ class ParcelsRepository {
     if (e.postedDate != null) {
       entries.add(ParcelTimelineEntry(
         timestamp: e.postedDate!,
-        icon: Icons.exit_to_app_outlined,
+        icon: Icons.home_work_outlined,
         title: 'نُشر أمر الإخلاء على المبنى',
         subtitle: (e.familyCount != null && e.individualCount != null)
             ? '${e.familyCount} عائلات — ${e.individualCount} أفراد'
-            : 'بدأت مهلة الامتثال 48 ساعة',
+            : 'بدأت مهلة الامتثال ${e.complianceHours} ساعة',
       ));
     }
     if (e.enforced && e.enforcedDate != null) {
@@ -306,6 +430,7 @@ class ParcelTimelineEntry {
     this.noticeId,
     this.complainantContact,
     this.mediaUrls = const [],
+    this.actorUid,
   });
 
   final DateTime timestamp;
@@ -325,4 +450,9 @@ class ParcelTimelineEntry {
   /// each source model, both hold photos AND videos; see MediaThumbnail,
   /// which auto-detects which is which per URL.
   final List<String> mediaUrls;
+
+  /// The user who performed this action, where the source record stored
+  /// one (complaints, decisions, site visits). Used by the full-history
+  /// report (R6) to say who did what; null where nothing was recorded.
+  final String? actorUid;
 }

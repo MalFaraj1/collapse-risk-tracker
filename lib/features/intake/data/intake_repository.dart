@@ -92,7 +92,10 @@ class IntakeRepository {
 
   /// Every complaint ever logged on this parcel (across every case), most
   /// recent first — lets a Call Center agent see what was previously
-  /// reported: narrative, photos, channel, contact info.
+  /// reported: narrative, photos, channel, contact info. Also what Intake
+  /// uses to decide whether there's a pending, not-yet-triaged complaint
+  /// that a new search should resume editing rather than duplicate — see
+  /// `intake_screen.dart`'s `_searchParcel`.
   ///
   /// NOTE: like getCaseHistory, this needs a Firestore composite index
   /// (equality on parcelId + orderBy date). The first time this runs,
@@ -144,6 +147,14 @@ class IntakeRepository {
   /// and returns their download URLs — matching exactly the path the
   /// Storage security rules authorize for Call Center/Engineering/Admin.
   ///
+  /// Each filename includes a fresh Firestore auto-ID, not just a loop
+  /// index — [updateComplaint] can call this a second time for the SAME
+  /// complaint (to add more photos during an edit), and a plain
+  /// `photo_0.jpg`/`photo_1.jpg` scheme would silently overwrite the
+  /// originally uploaded files at those exact paths the second time
+  /// around. A fresh unique segment per call makes that collision
+  /// impossible regardless of how many times photos are added later.
+  ///
   /// No client-side compression is applied. If large uploads become a
   /// problem in practice, add explicit compression before calling this —
   /// the Storage rules cap each file at 10MB regardless.
@@ -154,7 +165,8 @@ class IntakeRepository {
       final bytes = file.bytes;
       if (bytes == null) continue; // shouldn't happen with withData: true when picking
       final ext = file.extension?.toLowerCase() ?? 'jpg';
-      final ref = storage.ref('${FirestorePaths.complaints}/$complaintId/photo_$i.$ext');
+      final unique = firestore.collection(FirestorePaths.complaints).doc().id;
+      final ref = storage.ref('${FirestorePaths.complaints}/$complaintId/photo_${unique}_$i.$ext');
       await ref.putData(bytes, SettableMetadata(contentType: _mimeTypeFor(ext)));
       urls.add(await ref.getDownloadURL());
     }
@@ -176,8 +188,17 @@ class IntakeRepository {
     }
   }
 
-  /// FR-INT-1: logs the complaint, uploading any attached photos first so
-  /// their URLs can be stored on the complaint document in the same write.
+  /// FR-INT-1: logs a NEW complaint, uploading any attached photos first
+  /// so their URLs can be stored on the complaint document in the same
+  /// write. Always creates a fresh document with a new auto-generated ID
+  /// — call this only when logging a complaint for the first time.
+  ///
+  /// To edit an EXISTING, not-yet-triaged complaint, call
+  /// [updateComplaint] instead. Never call this method again for an edit:
+  /// it has no way to know an edit is "about" an existing document, so
+  /// doing so creates a second, separate complaint — which is exactly
+  /// what previously caused an edited complaint to show up twice in
+  /// Dashboard's "awaiting triage" queue.
   Future<Complaint> submitComplaint({
     required String caseId,
     required String parcelId,
@@ -203,5 +224,44 @@ class IntakeRepository {
     );
     await ref.set(complaint.toFirestoreCreate());
     return complaint;
+  }
+
+  /// Updates an EXISTING complaint's editable fields in place — date,
+  /// channel, narrative, contact. This is what Intake's "save" action
+  /// calls when the search found a pending complaint to resume editing,
+  /// instead of [submitComplaint].
+  ///
+  /// Uses Firestore's partial `.update()`, not `.set()` — combined with
+  /// [Complaint.toFirestoreUpdate] leaving `photoUrls` out of its own map
+  /// entirely, a complaint's EXISTING photos are left completely
+  /// untouched by an edit, exactly as you described. [newPhotos], if any
+  /// are passed, are uploaded and ADDED to that existing array via
+  /// `FieldValue.arrayUnion` — appended, never replacing what's there.
+  Future<void> updateComplaint({
+    required String complaintId,
+    required DateTime date,
+    required ComplaintChannel channel,
+    required String narrative,
+    String? complainantContact,
+    List<PlatformFile> newPhotos = const [],
+  }) async {
+    final newUrls = newPhotos.isEmpty ? <String>[] : await _uploadPhotos(complaintId, newPhotos);
+
+    final updated = Complaint(
+      id: complaintId,
+      caseId: '', // not written by toFirestoreUpdate(); required only by the constructor
+      parcelId: '', // not written by toFirestoreUpdate(); required only by the constructor
+      date: date,
+      channel: channel,
+      narrative: narrative,
+      complainantContact: complainantContact,
+      photoUrls: const [],
+      createdByUid: '', // not written by toFirestoreUpdate(); required only by the constructor
+    );
+    final updateMap = updated.toFirestoreUpdate();
+    if (newUrls.isNotEmpty) {
+      updateMap['photoUrls'] = FieldValue.arrayUnion(newUrls);
+    }
+    await firestore.collection(FirestorePaths.complaints).doc(complaintId).update(updateMap);
   }
 }

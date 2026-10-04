@@ -7,7 +7,6 @@ import '../../app/theme/app_typography.dart';
 import '../../core/constants/parcel_status.dart';
 import '../../core/utils/error_utils.dart';
 import '../../core/widgets/app_alert.dart';
-import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_card.dart';
 import '../../core/widgets/status_badge.dart';
 import '../intake/models/parcel.dart';
@@ -46,104 +45,6 @@ class _ParcelsListScreenState extends ConsumerState<ParcelsListScreen> {
     super.dispose();
   }
 
-  ParcelsRepository get _repo => ref.read(parcelsRepositoryProvider);
-
-  Future<void> _openNewParcelDialog() async {
-    final parcelNoController = TextEditingController();
-    final zoneController = TextEditingController();
-    final addressController = TextEditingController();
-    final buildingCountController = TextEditingController(text: '1');
-    String? error;
-    var saving = false;
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          title: const Text('عقار جديد'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (error != null) ...[
-                  AppAlert(kind: AppAlertKind.danger, message: error!),
-                  const SizedBox(height: 12),
-                ],
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: parcelNoController,
-                        decoration: const InputDecoration(labelText: 'رقم العقار'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: zoneController,
-                        decoration: const InputDecoration(labelText: 'المنطقة العقارية'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: addressController,
-                  decoration: const InputDecoration(labelText: 'العنوان'),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: 160,
-                  child: TextField(
-                    controller: buildingCountController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'عدد المباني'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: saving ? null : () => Navigator.pop(ctx), child: const Text('إلغاء')),
-            FilledButton(
-              onPressed: saving
-                  ? null
-                  : () async {
-                      if (parcelNoController.text.trim().isEmpty ||
-                          zoneController.text.trim().isEmpty ||
-                          addressController.text.trim().isEmpty) {
-                        setSt(() => error = 'الرجاء تعبئة رقم العقار والمنطقة والعنوان.');
-                        return;
-                      }
-                      setSt(() {
-                        saving = true;
-                        error = null;
-                      });
-                      try {
-                        await _repo.createParcel(
-                          parcelNo: parcelNoController.text,
-                          cadastralZone: zoneController.text,
-                          address: addressController.text,
-                          buildingCount: int.tryParse(buildingCountController.text) ?? 1,
-                        );
-                        if (ctx.mounted) Navigator.pop(ctx);
-                      } catch (e) {
-                        setSt(() {
-                          error = describeFirebaseError(e, 'تعذّر إنشاء العقار');
-                          saving = false;
-                        });
-                      }
-                    },
-              child: Text(saving ? 'جارٍ الحفظ...' : 'إنشاء العقار'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final parcelsAsync = ref.watch(_watchAllParcelsProvider);
@@ -151,12 +52,9 @@ class _ParcelsListScreenState extends ConsumerState<ParcelsListScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        PageHeader(
+        const PageHeader(
           title: 'سجلّ العقارات',
           subtitle: 'كل العقارات المسجّلة في النظام، مع الحالة الحالية لكل عقار.',
-          actions: [
-            AppButton(label: 'عقار جديد', icon: Icons.add_business_outlined, onPressed: _openNewParcelDialog),
-          ],
         ),
         const SizedBox(height: 22),
         parcelsAsync.when(
@@ -290,7 +188,7 @@ class _ParcelsListScreenState extends ConsumerState<ParcelsListScreen> {
             const AppEmptyState(
               icon: Icons.home_work_outlined,
               title: 'لا توجد عقارات مسجّلة بعد',
-              description: 'تُضاف العقارات تلقائيًا عند تسجيل شكوى جديدة، أو يمكن إنشاء عقار مباشرةً من هذه الشاشة.',
+              description: 'تُضاف العقارات تلقائيًا عند تسجيل شكوى جديدة.',
             )
           else if (filtered.isEmpty)
             Column(

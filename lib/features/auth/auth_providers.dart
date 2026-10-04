@@ -1,36 +1,63 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/constants/roles.dart';
 
-/// Raw FirebaseAuth instance. Kept as a provider (rather than calling
-/// `FirebaseAuth.instance` directly all over the app) so it's mockable in
-/// tests.
+import '../../core/constants/firestore_paths.dart';
+import '../../core/constants/roles.dart';
+import '../admin/models/app_user.dart';
+
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) => FirebaseAuth.instance);
 
-/// Emits the current [User] (or null) every time sign-in state changes.
-/// Everything else auth-related derives from this one stream.
 final authStateChangesProvider = StreamProvider<User?>((ref) {
   return ref.watch(firebaseAuthProvider).authStateChanges();
 });
 
-/// The signed-in user's role, read from their ID token's custom claims
-/// (`request.auth.token.role` — the same claim the Firestore/Storage
-/// security rules check). This is deliberately NOT read from a Firestore
-/// `users/{uid}` document field, since that would be client-writable and
-/// therefore spoofable; custom claims can only be set server-side (see the
-/// `setUserRole` Cloud Function).
-///
-/// Returns null while signed out, while the token is loading, or if a user
-/// somehow has no role claim yet (treat that as "no access", not "default
-/// access" — see [AppShell]/route guards).
-final currentUserRoleProvider = FutureProvider<AppRole?>((ref) async {
+/// The role stamped on the sign-in token (a Firebase custom claim). Only
+/// a fallback now — see [currentUserRoleProvider].
+final _claimRoleProvider = FutureProvider<AppRole?>((ref) async {
   final user = ref.watch(authStateChangesProvider).valueOrNull;
   if (user == null) return null;
-
-  // `false` = don't force-refresh on every rebuild; the app forces a
-  // refresh once, right after sign-in, in the login flow (see
-  // features/auth/login_screen.dart) since that's the one moment a claim
-  // set moments earlier by an Admin might not be on the cached token yet.
   final idTokenResult = await user.getIdTokenResult(false);
   return AppRole.fromClaim(idTokenResult.claims?['role'] as String?);
+});
+
+/// The signed-in user's directory entry (`users/{uid}`), live — so an
+/// administrator deactivating or re-roling someone takes effect on that
+/// person's screen immediately, without them signing out and back in.
+/// Null when the account has no directory entry.
+final currentUserProfileProvider = StreamProvider<AppUserProfile?>((ref) {
+  final user = ref.watch(authStateChangesProvider).valueOrNull;
+  if (user == null) return Stream.value(null);
+  return FirebaseFirestore.instance
+      .collection(FirestorePaths.users)
+      .doc(user.uid)
+      .snapshots()
+      .map((doc) => doc.exists ? AppUserProfile.fromFirestore(doc) : null);
+});
+
+/// The signed-in user's effective role (FR-USR-2).
+///
+/// Resolution order:
+///  1. A directory entry, if one exists — its role, or null (no access)
+///     if the account is deactivated.
+///  2. Otherwise the custom claim, so accounts that predate the directory
+///     (including the original administrator) keep working untouched.
+///
+/// If the directory can't be read at all (for instance the updated
+/// security rules haven't been published yet), this falls back to the
+/// claim instead of failing — a configuration gap must never lock every
+/// user out of the application.
+final currentUserRoleProvider = Provider<AsyncValue<AppRole?>>((ref) {
+  final user = ref.watch(authStateChangesProvider).valueOrNull;
+  if (user == null) return const AsyncData<AppRole?>(null);
+
+  final claim = ref.watch(_claimRoleProvider);
+  final profile = ref.watch(currentUserProfileProvider);
+
+  if (profile.hasError) return claim;
+  if (profile.isLoading) return const AsyncLoading<AppRole?>();
+
+  final entry = profile.valueOrNull;
+  if (entry != null) return AsyncData<AppRole?>(entry.active ? entry.role : null);
+  return claim;
 });

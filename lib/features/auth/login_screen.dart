@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_card.dart';
+import '../../core/widgets/app_logo.dart';
 import '../../core/widgets/app_alert.dart';
 import 'auth_providers.dart';
 
@@ -76,15 +77,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(color: AppColors.gold, borderRadius: BorderRadius.circular(14)),
-                        child: const Center(
-                          child: Text('م', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 22, color: AppColors.navy)),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
+                      const AppLogo(height: 120),
+                      const SizedBox(height: 18),
                       const Text('نظام متابعة المباني الآيلة للسقوط',
                           textAlign: TextAlign.center,
                           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.text)),

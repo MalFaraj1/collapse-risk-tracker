@@ -11,6 +11,9 @@ import '../../core/widgets/google_map_card.dart';
 import '../../core/widgets/media_thumbnail.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../core/widgets/timeline_rail.dart';
+import '../admin/data/admin_repository.dart';
+import '../audit/data/audit_log_repository.dart';
+import '../audit/models/audit_log_entry.dart';
 import '../intake/models/parcel.dart';
 import 'data/parcels_repository.dart';
 
@@ -98,14 +101,21 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
           builder: (context, constraints) {
             final isWide = constraints.maxWidth > 900;
             final infoPanel = _buildInfoPanel(parcel);
-            final timelinePanel = _buildTimelinePanel();
-            if (!isWide) return Column(children: [infoPanel, const SizedBox(height: 18), timelinePanel]);
+            final rightColumn = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildTimelinePanel(),
+                const SizedBox(height: 18),
+                _buildAuditTrailPanel(),
+              ],
+            );
+            if (!isWide) return Column(children: [infoPanel, const SizedBox(height: 18), rightColumn]);
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(child: infoPanel),
                 const SizedBox(width: 18),
-                Expanded(flex: 2, child: timelinePanel),
+                Expanded(flex: 2, child: rightColumn),
               ],
             );
           },
@@ -114,95 +124,58 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
     );
   }
 
-  /// The page's anchor: a navy banner carrying the parcel's identity (ID +
-  /// status), its address, and a row of quick-glance facts, so the key
-  /// information reads before the user scrolls into the detail panels.
+  /// A proper header treatment — replacing a plain title row — that reads
+  /// as the anchor for the whole page: a back affordance, the parcel's
+  /// identity (ID + status) at real prominence, and its address directly
+  /// beneath, all in one bordered surface rather than bare text floating
+  /// on the page background.
   Widget _buildHero(Parcel parcel) {
     return Container(
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: const LinearGradient(
-          begin: AlignmentDirectional.topStart,
-          end: AlignmentDirectional.bottomEnd,
-          colors: [AppColors.navy, AppColors.navy3],
-        ),
-        boxShadow: const [BoxShadow(color: Color(0x261B2A4A), blurRadius: 24, offset: Offset(0, 8))],
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+        boxShadow: const [BoxShadow(color: Color(0x0A1B2A4A), blurRadius: 16, offset: Offset(0, 4))],
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Soft decorative glyph so the banner doesn't read as a flat slab.
-          PositionedDirectional(
-            end: -24,
-            bottom: -36,
-            child: Icon(Icons.domain, size: 160, color: Colors.white.withOpacity(0.05)),
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => context.go('/parcels'),
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(color: AppColors.bg, shape: BoxShape.circle, border: Border.all(color: AppColors.border)),
+              child: const Icon(Icons.arrow_forward, size: 18, color: AppColors.textMuted),
+            ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+          const SizedBox(width: 16),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 8,
                   children: [
-                    Material(
-                      color: Colors.white.withOpacity(0.1),
-                      shape: const CircleBorder(),
-                      child: InkWell(
-                        customBorder: const CircleBorder(),
-                        onTap: () => context.go('/parcels'),
-                        child: const SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: Icon(Icons.arrow_forward, size: 18, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'تفاصيل العقار',
-                            style: TextStyle(fontSize: 12, color: AppColors.ice, fontWeight: FontWeight.w600, letterSpacing: 0.3),
-                          ),
-                          const SizedBox(height: 4),
-                          Wrap(
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            spacing: 12,
-                            runSpacing: 8,
-                            children: [
-                              Text(parcel.id, style: AppTypography.mono(fontSize: 24, weight: FontWeight.w800, color: Colors.white)),
-                              StatusBadge(status: parcel.status),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              const Icon(Icons.place_outlined, size: 15, color: AppColors.gold),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  parcel.address.isEmpty ? 'لا يوجد عنوان مسجَّل' : parcel.address,
-                                  style: const TextStyle(fontSize: 13.5, color: AppColors.ice),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
+                    Text(parcel.id, style: AppTypography.mono(fontSize: 22, weight: FontWeight.w800, color: AppColors.text)),
+                    StatusBadge(status: parcel.status),
                   ],
                 ),
-                const SizedBox(height: 18),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
+                const SizedBox(height: 6),
+                Row(
                   children: [
-                    _heroChip(Icons.tag, 'رقم العقار', parcel.parcelNo),
-                    _heroChip(Icons.map_outlined, 'المنطقة العقارية', parcel.cadastralZone),
-                    _heroChip(Icons.history, 'السجلات', _timeline.length.toString()),
+                    const Icon(Icons.place_outlined, size: 15, color: AppColors.textMuted),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        parcel.address.isEmpty ? 'لا يوجد عنوان مسجَّل' : parcel.address,
+                        style: const TextStyle(fontSize: 13.5, color: AppColors.textMuted),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -213,27 +186,6 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
     );
   }
 
-  Widget _heroChip(IconData icon, String label, String value) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white.withOpacity(0.12)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: AppColors.gold),
-            const SizedBox(width: 6),
-            Text('$label: ', style: const TextStyle(fontSize: 12, color: AppColors.ice)),
-            Text(
-              value.isEmpty ? '—' : value,
-              style: AppTypography.mono(fontSize: 12.5, weight: FontWeight.w700, color: Colors.white),
-            ),
-          ],
-        ),
-      );
-
   Widget _buildInfoPanel(Parcel parcel) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -242,11 +194,12 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
           title: 'بيانات العقار',
           icon: Icons.badge_outlined,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
             child: Column(
               children: [
                 _kv(Icons.tag, 'رقم العقار', parcel.parcelNo),
                 _kv(Icons.map_outlined, 'المنطقة العقارية', parcel.cadastralZone),
+                _kv(Icons.apartment_outlined, 'عدد المباني', parcel.buildingCount.toString()),
                 _kv(Icons.event_outlined, 'تاريخ الإنشاء', parcel.createdAt == null ? '—' : _fmt(parcel.createdAt!)),
                 _kv(Icons.update_outlined, 'آخر تحديث', parcel.updatedAt == null ? '—' : _fmt(parcel.updatedAt!), isLast: true),
               ],
@@ -278,7 +231,6 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
     return AppCardWithHeader(
       title: 'الخط الزمني للعقار',
       icon: Icons.history,
-      trailing: _timeline.isEmpty ? null : '${_timeline.length} سجل',
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: _timeline.isEmpty
@@ -336,24 +288,92 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
     );
   }
 
+  /// FR-AUD-2/3: the raw, field-level audit trail — distinct from the
+  /// narrative timeline above it. The timeline tells the STORY of a
+  /// parcel ("a complaint came in, then a decision was made"); this shows
+  /// the literal, attributable log of every write, which is what NFR-3's
+  /// accountability requirement is actually asking for.
+  Widget _buildAuditTrailPanel() {
+    final auditAsync = ref.watch(parcelAuditLogProvider(widget.parcelId));
+    final usersAsync = ref.watch(usersProvider);
+    final users = usersAsync.valueOrNull;
+
+    String actorName(String uid) {
+      if (uid.isEmpty) return '—';
+      final match = users?.where((u) => u.uid == uid).toList();
+      if (match == null || match.isEmpty) return 'مستخدم غير مسجَّل في الدليل';
+      final u = match.first;
+      return u.displayName.isEmpty ? u.email : u.displayName;
+    }
+
+    return AppCardWithHeader(
+      title: 'سجلّ التدقيق',
+      icon: Icons.fact_check_outlined,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: auditAsync.when(
+          loading: () => const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator())),
+          error: (e, _) => AppAlert(kind: AppAlertKind.danger, message: describeFirebaseError(e, 'تعذّر تحميل سجلّ التدقيق')),
+          data: (entries) => entries.isEmpty
+              ? const AppEmptyState(
+                  icon: Icons.fact_check_outlined,
+                  title: 'لا يوجد سجلّ تدقيق بعد',
+                  description: 'سيظهر هنا كل تغيير مرتبط بهذا العقار: من قام به، ومتى.',
+                )
+              : Column(
+                  children: [
+                    for (final entry in entries) _auditRow(entry, actorName(entry.actorUid)),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _auditRow(AuditLogEntry entry, String actor) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.border, width: 1))),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              margin: const EdgeInsets.only(top: 2),
+              decoration: BoxDecoration(color: AppColors.iceTint, borderRadius: BorderRadius.circular(7)),
+              child: const Icon(Icons.bolt, size: 14, color: AppColors.navy3),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.summary, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.text)),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$actor  ·  ${entry.timestamp == null ? '—' : _fmt(entry.timestamp!)}',
+                    style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+
   Widget _kv(IconData icon, String k, String v, {bool isLast = false}) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 11),
+        padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
           border: isLast ? null : const Border(bottom: BorderSide(color: AppColors.border, width: 1)),
         ),
         child: Row(
           children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(color: AppColors.iceTint, borderRadius: BorderRadius.circular(8)),
-              child: Icon(icon, size: 15, color: AppColors.navy3),
-            ),
-            const SizedBox(width: 10),
+            Icon(icon, size: 15, color: AppColors.textFaint),
+            const SizedBox(width: 8),
             Text(k, style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
             const Spacer(),
             Flexible(
-              child: Text(v.isEmpty ? '—' : v,
+              child: Text(v,
                   textAlign: TextAlign.end,
                   style: AppTypography.mono(fontSize: 12.5, weight: FontWeight.w700, color: AppColors.text)),
             ),

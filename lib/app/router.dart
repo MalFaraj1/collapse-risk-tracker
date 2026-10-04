@@ -19,9 +19,11 @@ import '../features/imports/import_screen.dart';
 import '../features/reports/reports_screen.dart';
 import '../features/admin/admin_screen.dart';
 
-/// Wraps a feature screen with [AppShell] (sidebar + top bar). Every
-/// authenticated route uses this — only `/login` doesn't.
-Widget _shelled(String route, Widget child) => AppShell(currentRoute: route, child: child);
+/// Wraps a feature screen in the shell's scrollable content area. The
+/// [AppShell] itself (sidebar + top bar) is built once by the [ShellRoute]
+/// below and stays mounted across navigations, so the sidebar keeps its
+/// scroll position instead of being rebuilt with every page.
+Widget _page(Widget child) => ShellContent(child: child);
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authNotifier = _AuthRefreshNotifier(ref);
@@ -40,130 +42,129 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
 
-      GoRoute(
-        path: '/dashboard',
-        builder: (context, state) => _shelled('/dashboard', const DashboardScreen()),
-      ),
+      // Every authenticated route lives under this ShellRoute — only `/login`
+      // doesn't.
+      ShellRoute(
+        builder: (context, state, child) => AppShell(currentRoute: state.uri.path, child: child),
+        routes: [
+          GoRoute(
+            path: '/dashboard',
+            builder: (context, state) => _page(const DashboardScreen()),
+          ),
 
-      // --- Parcels / neighborhoods -------------------------------------------------
-      // `all` and `area/:neighborhoodId` are declared BEFORE the catch-all
-      // `:parcelId` route on purpose: go_router matches static path
-      // segments against sibling routes in declaration order, and a real
-      // parcel ID (e.g. "4471_Z12") will never collide with the literal
-      GoRoute(
-        path: '/parcels',
-        builder: (context, state) => _shelled('/parcels', const ParcelsListScreen()),
-        routes: [
+          // --- Parcels / neighborhoods ---------------------------------------------
+          // `all` and `area/:neighborhoodId` are declared BEFORE the catch-all
+          // `:parcelId` route on purpose: go_router matches static path
+          // segments against sibling routes in declaration order, and a real
+          // parcel ID (e.g. "4471_Z12") will never collide with the literal
           GoRoute(
-            path: ':parcelId',
-            builder: (context, state) => _shelled(
-              '/parcels',
-              ParcelDetailScreen(parcelId: state.pathParameters['parcelId']!),
-            ),
+            path: '/parcels',
+            builder: (context, state) => _page(const ParcelsListScreen()),
+            routes: [
+              GoRoute(
+                path: ':parcelId',
+                builder: (context, state) => _page(
+                  ParcelDetailScreen(parcelId: state.pathParameters['parcelId']!),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
 
-      GoRoute(
-        path: '/intake/new',
-        builder: (context, state) => _shelled('/intake/new', const IntakeScreen()),
-      ),
-      GoRoute(
-        path: '/triage',
-        builder: (context, state) => _shelled('/triage', const TriageScreen()),
-        routes: [
           GoRoute(
-            path: ':complaintId',
-            builder: (context, state) => _shelled(
-              '/triage',
-              TriageScreen(complaintId: state.pathParameters['complaintId']),
+            path: '/intake/new',
+            builder: (context, state) => _page(const IntakeScreen()),
+          ),
+          GoRoute(
+            path: '/triage',
+            builder: (context, state) => _page(const TriageScreen()),
+            routes: [
+              GoRoute(
+                path: ':complaintId',
+                builder: (context, state) => _page(
+                  TriageScreen(complaintId: state.pathParameters['complaintId']),
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/review',
+            builder: (context, state) => _page(const ReviewScreen()),
+            routes: [
+              GoRoute(
+                path: ':caseId',
+                builder: (context, state) => _page(
+                  ReviewScreen(caseId: state.pathParameters['caseId']),
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/notices/:noticeId',
+            builder: (context, state) => _page(
+              NoticePreviewScreen(noticeId: state.pathParameters['noticeId']),
             ),
           ),
-        ],
-      ),
-      GoRoute(
-        path: '/review',
-        builder: (context, state) => _shelled('/review', const ReviewScreen()),
-        routes: [
           GoRoute(
-            path: ':caseId',
-            builder: (context, state) => _shelled(
-              '/review',
-              ReviewScreen(caseId: state.pathParameters['caseId']),
-            ),
+            path: '/evacuation',
+            builder: (context, state) => _page(const EvacuationScreen()),
+            routes: [
+              GoRoute(
+                path: ':decisionId',
+                builder: (context, state) => _page(
+                  EvacuationScreen(decisionId: state.pathParameters['decisionId']),
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/sitevisits',
+            builder: (context, state) => _page(const SiteVisitScreen()),
+            routes: [
+              GoRoute(
+                path: ':decisionId',
+                builder: (context, state) => _page(
+                  SiteVisitScreen(decisionId: state.pathParameters['decisionId']),
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/assessment',
+            builder: (context, state) => _page(const AssessmentScreen()),
+            routes: [
+              GoRoute(
+                path: ':decisionId',
+                builder: (context, state) => _page(
+                  AssessmentScreen(decisionId: state.pathParameters['decisionId']),
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/demolition',
+            builder: (context, state) => _page(const DemolitionScreen()),
+            routes: [
+              GoRoute(
+                path: ':decisionId',
+                builder: (context, state) => _page(
+                  DemolitionScreen(decisionId: state.pathParameters['decisionId']),
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/import',
+            builder: (context, state) => _page(const ImportScreen()),
+          ),
+          GoRoute(
+            path: '/reports',
+            builder: (context, state) => _page(const ReportsScreen()),
+          ),
+          GoRoute(
+            path: '/admin',
+            builder: (context, state) => _page(const AdminScreen()),
           ),
         ],
-      ),
-      GoRoute(
-        path: '/notices/:noticeId',
-        builder: (context, state) => _shelled(
-          '/notices',
-          NoticePreviewScreen(noticeId: state.pathParameters['noticeId']),
-        ),
-      ),
-      GoRoute(
-        path: '/evacuation',
-        builder: (context, state) => _shelled('/evacuation', const EvacuationScreen()),
-        routes: [
-          GoRoute(
-            path: ':decisionId',
-            builder: (context, state) => _shelled(
-              '/evacuation',
-              EvacuationScreen(decisionId: state.pathParameters['decisionId']),
-            ),
-          ),
-        ],
-      ),
-      GoRoute(
-        path: '/sitevisits',
-        builder: (context, state) => _shelled('/sitevisits', const SiteVisitScreen()),
-        routes: [
-          GoRoute(
-            path: ':decisionId',
-            builder: (context, state) => _shelled(
-              '/sitevisits',
-              SiteVisitScreen(decisionId: state.pathParameters['decisionId']),
-            ),
-          ),
-        ],
-      ),
-      GoRoute(
-        path: '/assessment',
-        builder: (context, state) => _shelled('/assessment', const AssessmentScreen()),
-        routes: [
-          GoRoute(
-            path: ':decisionId',
-            builder: (context, state) => _shelled(
-              '/assessment',
-              AssessmentScreen(decisionId: state.pathParameters['decisionId']),
-            ),
-          ),
-        ],
-      ),
-      GoRoute(
-        path: '/demolition',
-        builder: (context, state) => _shelled('/demolition', const DemolitionScreen()),
-        routes: [
-          GoRoute(
-            path: ':decisionId',
-            builder: (context, state) => _shelled(
-              '/demolition',
-              DemolitionScreen(decisionId: state.pathParameters['decisionId']),
-            ),
-          ),
-        ],
-      ),
-      GoRoute(
-        path: '/import',
-        builder: (context, state) => _shelled('/import', const ImportScreen()),
-      ),
-      GoRoute(
-        path: '/reports',
-        builder: (context, state) => _shelled('/reports', const ReportsScreen()),
-      ),
-      GoRoute(
-        path: '/admin',
-        builder: (context, state) => _shelled('/admin', const AdminScreen()),
       ),
     ],
   );

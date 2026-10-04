@@ -13,6 +13,7 @@ import '../../core/utils/web_download.dart';
 import '../../core/widgets/app_alert.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_card.dart';
+import '../../core/widgets/app_logo.dart';
 import '../auth/auth_providers.dart';
 import '../intake/models/parcel.dart';
 import '../review/models/decision.dart';
@@ -310,6 +311,8 @@ class _NoticePreviewScreenState extends ConsumerState<NoticePreviewScreen> {
           const Center(
             child: Column(
               children: [
+                AppLogo(height: 84),
+                SizedBox(height: 10),
                 Text('بلدية طرابلس', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppColors.text)),
                 SizedBox(height: 3),
                 Text(

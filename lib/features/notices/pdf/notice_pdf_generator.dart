@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../../../core/pdf/pdf_branding.dart';
 import '../../../core/pdf/pdf_fonts.dart';
 import '../../intake/models/parcel.dart';
 import '../../review/models/decision.dart';
@@ -23,6 +24,7 @@ Future<Uint8List> buildNoticePdf({
   String? linkedWarningShortId,
 }) async {
   final doc = pw.Document(theme: await PdfFonts.theme());
+  final logo = await PdfBranding.logo();
   String fmt(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   final shortId = (notice.id.length <= 8 ? notice.id : notice.id.substring(0, 8)).toUpperCase();
 
@@ -34,6 +36,8 @@ Future<Uint8List> buildNoticePdf({
       build: (context) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
+          pw.Image(logo, height: 72),
+          pw.SizedBox(height: 8),
           pw.Text('بلدية طرابلس', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16)),
           pw.SizedBox(height: 3),
           pw.Text(

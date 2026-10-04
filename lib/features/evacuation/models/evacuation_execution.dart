@@ -36,6 +36,7 @@ class EvacuationExecution {
     this.complianceOutcome,
     this.enforced = false,
     this.enforcedDate,
+    this.complianceHours = 48,
     this.createdAt,
   });
 
@@ -68,9 +69,16 @@ class EvacuationExecution {
   final bool enforced;
   final DateTime? enforcedDate;
 
+  /// Length of the compliance window, in hours, recorded at the moment the
+  /// order was posted from the administrator-configurable default (BR-4 /
+  /// BR-7). Stored on the execution — not re-read later — so changing the
+  /// default never moves the deadline of an evacuation already under way.
+  /// Executions that predate this field fall back to the original 48h.
+  final int complianceHours;
+
   final DateTime? createdAt;
 
-  DateTime? get complianceDeadline => postedDate?.add(const Duration(hours: 48));
+  DateTime? get complianceDeadline => postedDate?.add(Duration(hours: complianceHours));
 
   bool get isFullyVacated => complianceOutcome == ComplianceOutcome.vacated || enforced;
 
@@ -92,6 +100,7 @@ class EvacuationExecution {
       complianceOutcome: ComplianceOutcome.fromFirestore(data['complianceOutcome'] as String?),
       enforced: data['enforced'] as bool? ?? false,
       enforcedDate: (data['enforcedDate'] as Timestamp?)?.toDate(),
+      complianceHours: (data['complianceHours'] as num?)?.toInt() ?? 48,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
     );
   }

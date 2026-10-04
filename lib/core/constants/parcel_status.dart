@@ -97,28 +97,3 @@ enum ParcelStatus {
     );
   }
 }
-
-/// Review priority (§7.3, BR-6).
-enum ReviewPriority {
-  low, medium, high, urgent;
-
-  String get label => switch (this) {
-        ReviewPriority.low => 'منخفض',
-        ReviewPriority.medium => 'متوسط',
-        ReviewPriority.high => 'مرتفع',
-        ReviewPriority.urgent => 'عاجل',
-      };
-
-  Color get color => this == ReviewPriority.urgent ? Colors.white : switch (this) {
-        ReviewPriority.high => AppColors.warning,
-        ReviewPriority.medium => AppColors.info,
-        _ => AppColors.textMuted,
-      };
-
-  Color get backgroundColor => switch (this) {
-        ReviewPriority.urgent => AppColors.danger,
-        ReviewPriority.high => AppColors.warningBg,
-        ReviewPriority.medium => AppColors.infoBg,
-        ReviewPriority.low => AppColors.bg,
-      };
-}

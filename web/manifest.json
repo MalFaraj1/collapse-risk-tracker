@@ -1,11 +1,13 @@
 {
-    "name": "collapse_risk_tracker",
-    "short_name": "collapse_risk_tracker",
+    "name": "نظام متابعة المباني الآيلة للسقوط — بلدية طرابلس",
+    "short_name": "متابعة المباني",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#1B2A4A",
+    "description": "نظام متابعة المباني الآيلة للسقوط — بلدية طرابلس",
+    "lang": "ar",
+    "dir": "rtl",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -6,6 +6,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/constants/roles.dart';
 import '../../features/auth/auth_providers.dart';
 import 'app_button.dart';
+import 'app_logo.dart';
 import 'nav_items.dart';
 
 /// The persistent app frame: sidebar navigation (filtered to the signed-in
@@ -28,7 +29,18 @@ class AppShell extends ConsumerWidget {
     final user = ref.watch(authStateChangesProvider).valueOrNull;
 
     return roleAsync.when(
-      loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+      loading: () => const Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppLogo(height: 110),
+              SizedBox(height: 24),
+              SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
+            ],
+          ),
+        ),
+      ),
       error: (e, _) => Scaffold(body: Center(child: Text('تعذّر تحميل صلاحيات المستخدم: $e'))),
       data: (role) {
         if (role == null) {
@@ -56,16 +68,7 @@ class AppShell extends ConsumerWidget {
                   children: [
                     _TopBar(role: role, user: user),
                     Expanded(
-                      child: Container(
-                        color: AppColors.bg,
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(28, 26, 28, 60),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 1400),
-                            child: child,
-                          ),
-                        ),
-                      ),
+                      child: Container(color: AppColors.bg, child: child),
                     ),
                   ],
                 ),
@@ -74,6 +77,29 @@ class AppShell extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// The scrollable, padded content area for a single screen inside
+/// [AppShell]. Lives per-route (not in the shell) because the shell's child
+/// is go_router's nested [Navigator], which needs bounded height.
+class ShellContent extends StatelessWidget {
+  const ShellContent({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.bg,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(28, 26, 28, 60),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1400),
+          child: child,
+        ),
+      ),
     );
   }
 }
@@ -101,19 +127,22 @@ class _Sidebar extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(color: AppColors.gold, borderRadius: BorderRadius.circular(10)),
-                  child: const Center(
-                    child: Text('م', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: AppColors.navy)),
-                  ),
-                ),
+                const AppLogo(height: 46, onDark: true),
                 const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'نظام متابعة المباني الآيلة للسقوط',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'نظام متابعة المباني الآيلة للسقوط',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'بلدية طرابلس',
+                        style: TextStyle(color: Colors.white.withOpacity(.55), fontWeight: FontWeight.w600, fontSize: 11),
+                      ),
+                    ],
                   ),
                 ),
               ],

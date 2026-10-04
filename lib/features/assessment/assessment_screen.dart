@@ -71,6 +71,7 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
   String? _studyError;
 
   AssessmentRepository get _repo => ref.read(assessmentRepositoryProvider);
+  bool get _isClosed => _caseRecord?.status == CaseStatus.closed;
 
   @override
   void initState() {
@@ -247,6 +248,14 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
           style: TextStyle(fontSize: 13, color: AppColors.textMuted),
         ),
         const SizedBox(height: 14),
+        if (_isClosed) ...[
+          const AppAlert(
+            kind: AppAlertKind.success,
+            title: 'الحالة مغلقة',
+            message: 'أُغلقت هذه الحالة بوصفها آمنة. البيانات أدناه للاطلاع فقط ولا يمكن تعديلها.',
+          ),
+          const SizedBox(height: 14),
+        ],
         _tabBar(),
         const SizedBox(height: 18),
         LayoutBuilder(
@@ -367,7 +376,7 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
           child: AppButton(
             label: _savingExternal ? 'جارٍ الحفظ...' : 'حفظ التحديثات',
             icon: Icons.save_outlined,
-            onPressed: _savingExternal ? null : _saveExternal,
+            onPressed: (_savingExternal || _isClosed) ? null : _saveExternal,
           ),
         ),
       ],
@@ -458,7 +467,7 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
           child: AppButton(
             label: _savingStudy ? 'جارٍ الحفظ...' : 'حفظ التحديثات',
             icon: Icons.save_outlined,
-            onPressed: _savingStudy ? null : _saveStudy,
+            onPressed: (_savingStudy || _isClosed) ? null : _saveStudy,
           ),
         ),
       ],

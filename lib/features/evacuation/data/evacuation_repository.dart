@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/firestore_paths.dart';
+import '../../../core/constants/parcel_status.dart';
+import '../../admin/models/follow_up_settings.dart';
 import '../../assessment/models/assessment.dart';
 import '../../intake/data/intake_repository.dart' show firestoreProvider;
 import '../../review/models/decision.dart';
@@ -45,7 +47,17 @@ class EvacuationRepository {
       firestore.collection(FirestorePaths.evacuationExecutions).doc(id);
 
   /// FR-EVC-2: step 1 — posting the order starts the 48h compliance clock.
-  Future<void> markPosted(String id) => _ref(id).update({'postedDate': FieldValue.serverTimestamp()});
+  ///
+  /// The compliance window length is read from the administrator's
+  /// default (BR-4) at this moment and stored on the execution, so the
+  /// deadline is fixed for this evacuation from here on.
+  Future<void> markPosted(String id) async {
+    final settings = await FollowUpSettings.load(firestore);
+    await _ref(id).update({
+      'postedDate': FieldValue.serverTimestamp(),
+      'complianceHours': settings.evacuationHours,
+    });
+  }
 
   /// FR-EVC-3: step 2.
   Future<void> markResidentsDataCollected(String id, {required int families, required int individuals}) =>
@@ -109,13 +121,24 @@ class EvacuationRepository {
     final existing = await assessmentRef.get();
     if (existing.exists) return;
 
+    final parcelId = executionData['parcelId'] as String? ?? '';
     final assessment = Assessment(
       id: decisionId,
       decisionId: decisionId,
       caseId: executionData['caseId'] as String? ?? '',
-      parcelId: executionData['parcelId'] as String? ?? '',
+      parcelId: parcelId,
       triggerReason: AssessmentTrigger.evacuation,
     );
     await assessmentRef.set(assessment.toFirestoreInitial());
+
+    // Parcel-level status transition (Appendix B): EVACUATION →
+    // IN_ASSESSMENT once the building is confirmed vacated/enforced and
+    // assessment is triggered.
+    if (parcelId.isNotEmpty) {
+      await firestore.collection(FirestorePaths.parcels).doc(parcelId).update({
+        'status': ParcelStatus.inAssessment.firestoreValue,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
   }
 }

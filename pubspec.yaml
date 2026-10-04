@@ -45,3 +45,4 @@ flutter:
   assets:
     - assets/fonts/Cairo-Regular.ttf
     - assets/fonts/Cairo-Bold.ttf
+    - assets/logo/logo.jpg
