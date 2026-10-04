@@ -160,16 +160,28 @@ class _UsersTab extends ConsumerWidget {
                   description: 'أضف أول مستخدم بالضغط على "إضافة مستخدم".',
                 );
               }
-              return SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('المستخدم')),
-                    DataColumn(label: Text('الدور')),
-                    DataColumn(label: Text('الحالة')),
-                    DataColumn(label: Text('')),
-                  ],
-                  rows: [for (final u in users) _row(context, u, isSelf: u.uid == myUid)],
+              // Fill the card's width (instead of shrinking to content) and
+              // still scroll horizontally when the window is too narrow.
+              return LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                    child: DataTable(
+                      horizontalMargin: 16,
+                      columnSpacing: 28,
+                      headingRowHeight: 42,
+                      dataRowMinHeight: 58,
+                      dataRowMaxHeight: 64,
+                      columns: const [
+                        DataColumn(label: Text('المستخدم')),
+                        DataColumn(label: Text('الدور')),
+                        DataColumn(label: Text('الحالة')),
+                        DataColumn(label: Text('')),
+                      ],
+                      rows: [for (final u in users) _row(context, u, isSelf: u.uid == myUid)],
+                    ),
+                  ),
                 ),
               );
             },
@@ -180,7 +192,7 @@ class _UsersTab extends ConsumerWidget {
   }
 
   DataRow _row(BuildContext context, AppUserProfile u, {required bool isSelf}) {
-    return DataRow(cells: [
+    return DataRow(key: ValueKey(u.uid), cells: [
       DataCell(
         Row(
           mainAxisSize: MainAxisSize.min,
@@ -192,11 +204,12 @@ class _UsersTab extends ConsumerWidget {
             ),
             const SizedBox(width: 10),
             Column(
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  u.displayName.isEmpty ? '—' : u.displayName + (isSelf ? '  (أنت)' : ''),
+                  (u.displayName.isEmpty ? '—' : u.displayName) + (isSelf ? '  (أنت)' : ''),
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.text),
                 ),
                 Text(u.email, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),

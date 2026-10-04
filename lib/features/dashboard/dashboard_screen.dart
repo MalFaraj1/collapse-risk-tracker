@@ -4,12 +4,15 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/constants/access_policy.dart';
+import '../../core/constants/roles.dart';
 import '../../core/utils/error_utils.dart';
 import '../../core/widgets/app_alert.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_card.dart';
 import '../../core/widgets/status_badge.dart';
 import '../assessment/models/assessment.dart';
+import '../auth/auth_providers.dart';
 import '../demolition/models/demolition_order.dart';
 import '../intake/models/case.dart';
 import '../intake/models/complaint.dart';
@@ -31,14 +34,15 @@ import 'data/dashboard_repository.dart';
 /// and fully functional, just unreachable without already knowing a
 /// Firestore document ID.
 ///
-/// All six queues are genuine Firestore snapshot listeners, visible to
-/// every signed-in role — the same way Triage's and Review's queues
-/// always have been. Role-based filtering (so a Call Center account
-/// doesn't see Police's Evacuation/Demolition queues, say) is a
-/// reasonable next step, but doing it only for the four new queues while
-/// leaving the original two universally visible would be an inconsistent
-/// half-measure; it belongs with Admin Settings' eventual user/role
-/// directory (see the Reports Hub's R4 note for the identical gap).
+/// All six queues are genuine Firestore snapshot listeners, but each role
+/// only gets — and only subscribes to — the queues it actually works on,
+/// as defined once in [AccessPolicy] (the same table the sidebar and the
+/// router's route guard use): Engineering gets triage, review and
+/// assessment; Police gets evacuation, site visits and demolition; the
+/// Administrator gets everything; Call Center has no work queues and gets
+/// the "new complaint" shortcut instead. Previously every role saw every
+/// queue and every action button, so a Police account could open the
+/// triage screen — which is the Engineering team's job.
 ///
 /// "إجراءات متأخرة" (overdue) and "بانتظار زيارة ميدانية" are both
 /// DERIVED from the queues themselves — `.length` and an
@@ -96,49 +100,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final awaitingAsync = ref.watch(complaintsAwaitingTriageProvider);
-    final awaitingReviewAsync = ref.watch(casesAwaitingReviewProvider);
-    final evacuationsAsync = ref.watch(evacuationsInProgressProvider);
-    final siteVisitsAsync = ref.watch(siteVisitsNeededProvider);
-    final assessmentsAsync = ref.watch(assessmentsPendingProvider);
-    final demolitionsAsync = ref.watch(demolitionsInProgressProvider);
+    final role = ref.watch(currentUserRoleProvider).valueOrNull;
+    if (role == null) {
+      // The app shell already shows its own loading / no-access screen
+      // while the role resolves; this only guards the brief overlap.
+      return const Padding(padding: EdgeInsets.all(60), child: Center(child: CircularProgressIndicator()));
+    }
+
+    // Only subscribe to the queues this role actually works on. A role
+    // never opens a listener on another team's queue — which is what the
+    // sidebar already promises, and one less thing that can fail.
+    final triageAsync = AccessPolicy.triage.contains(role) ? ref.watch(complaintsAwaitingTriageProvider) : null;
+    final reviewAsync = AccessPolicy.review.contains(role) ? ref.watch(casesAwaitingReviewProvider) : null;
+    final evacuationsAsync = AccessPolicy.evacuation.contains(role) ? ref.watch(evacuationsInProgressProvider) : null;
+    final siteVisitsAsync = AccessPolicy.siteVisits.contains(role) ? ref.watch(siteVisitsNeededProvider) : null;
+    final assessmentsAsync = AccessPolicy.assessment.contains(role) ? ref.watch(assessmentsPendingProvider) : null;
+    final demolitionsAsync = AccessPolicy.demolition.contains(role) ? ref.watch(demolitionsInProgressProvider) : null;
     final closedThisMonthAsync = ref.watch(closedThisMonthCountProvider);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        PageHeader(
-          title: 'الإجراءات المستحقة',
-          subtitle: 'قائمة العمل الحية لكل فريق — الشكاوى والحالات والقرارات التي تنتظر إجراءً.',
-          actions: [
-            AppButton(
-              label: 'تحديث',
-              icon: Icons.refresh,
-              variant: AppButtonVariant.outline,
-              onPressed: _refreshAll,
-            ),
-            AppButton(
-              label: 'شكوى جديدة',
-              icon: Icons.add,
-              onPressed: () => context.go('/intake/new'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        _buildStatRow(
-          awaitingAsync: awaitingAsync,
-          evacuationsAsync: evacuationsAsync,
-          siteVisitsAsync: siteVisitsAsync,
-          closedThisMonthAsync: closedThisMonthAsync,
-        ),
-        const SizedBox(height: 28),
-        _buildQueuesToolbar(),
-        const SizedBox(height: 14),
+    final queues = <Widget>[
+      if (triageAsync != null)
         _queueCard<Complaint>(
           key: _triageKey,
           title: 'بانتظار الفرز',
           icon: Icons.rule_outlined,
-          async: awaitingAsync,
+          async: triageAsync,
           errorMessage: 'تعذّر تحميل الشكاوى بانتظار الفرز',
           parcelIdOf: (c) => c.parcelId,
           extraSearchOf: (c) => c.narrative,
@@ -156,12 +142,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ],
           rowBuilder: _buildTriageRow,
         ),
-        const SizedBox(height: 16),
+      if (reviewAsync != null)
         _queueCard<Case>(
           key: _reviewKey,
           title: 'بانتظار المراجعة',
           icon: Icons.fact_check_outlined,
-          async: awaitingReviewAsync,
+          async: reviewAsync,
           errorMessage: 'تعذّر تحميل الحالات بانتظار المراجعة',
           parcelIdOf: (c) => c.parcelId,
           isOverdue: (c) => c.dispatchedOnsiteAt != null,
@@ -176,37 +162,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ],
           rowBuilder: _buildReviewRow,
         ),
-        const SizedBox(height: 16),
-        _queueCard<Decision>(
-          key: _evacuationKey,
-          title: 'إخلاءات قيد التنفيذ',
-          icon: Icons.exit_to_app_outlined,
-          async: evacuationsAsync,
-          errorMessage: 'تعذّر تحميل قرارات الإخلاء',
-          parcelIdOf: (d) => d.parcelId,
-          isOverdue: _isDecisionOverdue,
-          emptyIcon: Icons.checklist_rtl_outlined,
-          emptyTitle: 'لا توجد إخلاءات قيد التنفيذ',
-          emptyDescription: 'ستظهر هنا أي قرار إخلاء فور صدوره من شاشة المراجعة والقرار.',
-          columns: _decisionColumns,
-          rowBuilder: (d) => _buildDecisionRow(d, 'متابعة الإخلاء', '/evacuation'),
-        ),
-        const SizedBox(height: 16),
-        _queueCard<Decision>(
-          key: _siteVisitKey,
-          title: 'بانتظار زيارة ميدانية',
-          icon: Icons.domain_verification_outlined,
-          async: siteVisitsAsync,
-          errorMessage: 'تعذّر تحميل الحالات بانتظار زيارة ميدانية',
-          parcelIdOf: (d) => d.parcelId,
-          isOverdue: _isDecisionOverdue,
-          emptyIcon: Icons.checklist_rtl_outlined,
-          emptyTitle: 'لا توجد حالات بانتظار زيارة ميدانية',
-          emptyDescription: 'ستظهر هنا أي إنذار تدعيم أو ترميم فور صدوره، إلى حين تسجيل نتيجة الزيارة.',
-          columns: _decisionColumns,
-          rowBuilder: (d) => _buildDecisionRow(d, 'تسجيل زيارة', '/sitevisits'),
-        ),
-        const SizedBox(height: 16),
+      if (assessmentsAsync != null)
         _queueCard<Assessment>(
           key: _assessmentKey,
           title: 'بانتظار التقييم الخارجي',
@@ -225,7 +181,37 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ],
           rowBuilder: _buildAssessmentRow,
         ),
-        const SizedBox(height: 16),
+      if (evacuationsAsync != null)
+        _queueCard<Decision>(
+          key: _evacuationKey,
+          title: 'إخلاءات قيد التنفيذ',
+          icon: Icons.exit_to_app_outlined,
+          async: evacuationsAsync,
+          errorMessage: 'تعذّر تحميل قرارات الإخلاء',
+          parcelIdOf: (d) => d.parcelId,
+          isOverdue: _isDecisionOverdue,
+          emptyIcon: Icons.checklist_rtl_outlined,
+          emptyTitle: 'لا توجد إخلاءات قيد التنفيذ',
+          emptyDescription: 'ستظهر هنا أي قرار إخلاء فور صدوره من شاشة المراجعة والقرار.',
+          columns: _decisionColumns,
+          rowBuilder: (d) => _buildDecisionRow(d, 'متابعة الإخلاء', '/evacuation'),
+        ),
+      if (siteVisitsAsync != null)
+        _queueCard<Decision>(
+          key: _siteVisitKey,
+          title: 'بانتظار زيارة ميدانية',
+          icon: Icons.domain_verification_outlined,
+          async: siteVisitsAsync,
+          errorMessage: 'تعذّر تحميل الحالات بانتظار زيارة ميدانية',
+          parcelIdOf: (d) => d.parcelId,
+          isOverdue: _isDecisionOverdue,
+          emptyIcon: Icons.checklist_rtl_outlined,
+          emptyTitle: 'لا توجد حالات بانتظار زيارة ميدانية',
+          emptyDescription: 'ستظهر هنا أي إنذار تدعيم أو ترميم فور صدوره، إلى حين تسجيل نتيجة الزيارة.',
+          columns: _decisionColumns,
+          rowBuilder: (d) => _buildDecisionRow(d, 'تسجيل زيارة', '/sitevisits'),
+        ),
+      if (demolitionsAsync != null)
         _queueCard<DemolitionOrder>(
           key: _demolitionKey,
           title: 'أوامر هدم قيد التنفيذ',
@@ -245,7 +231,76 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ],
           rowBuilder: _buildDemolitionRow,
         ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PageHeader(
+          title: 'الإجراءات المستحقة',
+          subtitle: role == AppRole.admin
+              ? 'قائمة العمل الحية لكل فريق — الشكاوى والحالات والقرارات التي تنتظر إجراءً.'
+              : 'قائمة عمل ${role.label} — ما ينتظر إجراءً من فريقك الآن.',
+          actions: [
+            AppButton(
+              label: 'تحديث',
+              icon: Icons.refresh,
+              variant: AppButtonVariant.outline,
+              onPressed: _refreshAll,
+            ),
+            // Only roles that may log a complaint get the shortcut — the
+            // route guard would turn anyone else away at the door anyway.
+            if (AccessPolicy.intake.contains(role))
+              AppButton(
+                label: 'شكوى جديدة',
+                icon: Icons.add,
+                onPressed: () => context.go('/intake/new'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        _buildStatRow(
+          role: role,
+          triageAsync: triageAsync,
+          reviewAsync: reviewAsync,
+          evacuationsAsync: evacuationsAsync,
+          siteVisitsAsync: siteVisitsAsync,
+          assessmentsAsync: assessmentsAsync,
+          demolitionsAsync: demolitionsAsync,
+          closedThisMonthAsync: closedThisMonthAsync,
+        ),
+        const SizedBox(height: 28),
+        if (queues.isEmpty)
+          _noQueuesNotice()
+        else ...[
+          _buildQueuesToolbar(),
+          const SizedBox(height: 14),
+          ..._withGaps(queues),
+        ],
       ],
+    );
+  }
+
+  /// Puts a fixed gap between consecutive widgets (and none before the
+  /// first or after the last), so each role's own set of queues is spaced
+  /// evenly however many of them it has.
+  List<Widget> _withGaps(List<Widget> items) => [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(height: 16),
+          items[i],
+        ],
+      ];
+
+  /// Shown instead of the queue list for a role that has no work queues
+  /// of its own (Call Center), so the page isn't just an empty void.
+  Widget _noQueuesNotice() {
+    return AppCard(
+      child: const AppEmptyState(
+        icon: Icons.inbox_outlined,
+        title: 'لا توجد قوائم عمل لهذا الدور',
+        description: 'تُعرض هنا قوائم الفرز والمراجعة والتنفيذ الخاصة بالفرق الهندسية والميدانية. '
+            'يمكنك تسجيل بلاغ جديد، أو تصفّح سجلّ العقارات والتقارير من القائمة الجانبية.',
+      ),
     );
   }
 
@@ -392,47 +447,105 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   // Stat cards
   // ==========================================================================
   Widget _buildStatRow({
-    required AsyncValue<List<Complaint>> awaitingAsync,
-    required AsyncValue<List<Decision>> evacuationsAsync,
-    required AsyncValue<List<Decision>> siteVisitsAsync,
+    required AppRole role,
+    required AsyncValue<List<Complaint>>? triageAsync,
+    required AsyncValue<List<Case>>? reviewAsync,
+    required AsyncValue<List<Decision>>? evacuationsAsync,
+    required AsyncValue<List<Decision>>? siteVisitsAsync,
+    required AsyncValue<List<Assessment>>? assessmentsAsync,
+    required AsyncValue<List<DemolitionOrder>>? demolitionsAsync,
     required AsyncValue<int> closedThisMonthAsync,
   }) {
-    final evacuationOverdue = evacuationsAsync.valueOrNull?.any(_isDecisionOverdue) ?? false;
-    final overdueCount = _combinedOverdueCount(evacuationsAsync, siteVisitsAsync);
+    final evacuationOverdue = evacuationsAsync?.valueOrNull?.any(_isDecisionOverdue) ?? false;
 
-    final cards = [
-      _statCardFor(
-        value: awaitingAsync.valueOrNull?.length,
-        error: awaitingAsync.hasError ? awaitingAsync.error : null,
-        fallbackMessage: 'تعذّر تحميل عدد الشكاوى بانتظار الفرز',
-        label: 'بانتظار الفرز',
-        icon: Icons.rule_outlined,
-        iconColor: AppColors.warning,
-        iconBackground: AppColors.warningBg,
-        onTap: () => _scrollTo(_triageKey),
-      ),
-      _statCardFor(
-        value: overdueCount,
-        error: evacuationsAsync.hasError ? evacuationsAsync.error : (siteVisitsAsync.hasError ? siteVisitsAsync.error : null),
-        fallbackMessage: 'تعذّر تحميل عدد الإجراءات المتأخرة',
-        label: 'إجراءات متأخرة',
-        icon: Icons.warning_amber_rounded,
-        iconColor: AppColors.danger,
-        iconBackground: AppColors.dangerBg,
-        highlight: (overdueCount ?? 0) > 0,
-        onTap: () => _scrollTo(evacuationOverdue ? _evacuationKey : _siteVisitKey),
-      ),
-      _statCardFor(
-        value: siteVisitsAsync.valueOrNull?.length,
-        error: siteVisitsAsync.hasError ? siteVisitsAsync.error : null,
-        fallbackMessage: 'تعذّر تحميل عدد الحالات بانتظار زيارة ميدانية',
-        label: 'بانتظار زيارة ميدانية',
-        icon: Icons.domain_verification_outlined,
-        iconColor: AppColors.info,
-        iconBackground: AppColors.infoBg,
-        onTap: () => _scrollTo(_siteVisitKey),
-      ),
-      _statCardFor(
+    // Every card this role COULD show, keyed by what it is. A card is only
+    // built when the queue behind it is one the role is allowed to see —
+    // the role's own ordering below then picks which of them appear.
+    final available = <_Stat, Widget>{
+      if (triageAsync != null)
+        _Stat.triage: _statCardFor(
+          value: triageAsync.valueOrNull?.length,
+          error: triageAsync.hasError ? triageAsync.error : null,
+          fallbackMessage: 'تعذّر تحميل عدد الشكاوى بانتظار الفرز',
+          label: 'بانتظار الفرز',
+          icon: Icons.rule_outlined,
+          iconColor: AppColors.warning,
+          iconBackground: AppColors.warningBg,
+          onTap: () => _scrollTo(_triageKey),
+        ),
+      if (reviewAsync != null)
+        _Stat.review: _statCardFor(
+          value: reviewAsync.valueOrNull?.length,
+          error: reviewAsync.hasError ? reviewAsync.error : null,
+          fallbackMessage: 'تعذّر تحميل عدد الحالات بانتظار المراجعة',
+          label: 'بانتظار المراجعة',
+          icon: Icons.fact_check_outlined,
+          iconColor: AppColors.info,
+          iconBackground: AppColors.infoBg,
+          onTap: () => _scrollTo(_reviewKey),
+        ),
+      if (assessmentsAsync != null)
+        _Stat.assessment: _statCardFor(
+          value: assessmentsAsync.valueOrNull?.length,
+          error: assessmentsAsync.hasError ? assessmentsAsync.error : null,
+          fallbackMessage: 'تعذّر تحميل عدد حالات التقييم',
+          label: 'بانتظار التقييم',
+          icon: Icons.assignment_outlined,
+          iconColor: AppColors.info,
+          iconBackground: AppColors.infoBg,
+          onTap: () => _scrollTo(_assessmentKey),
+        ),
+      if (evacuationsAsync != null)
+        _Stat.evacuation: _statCardFor(
+          value: evacuationsAsync.valueOrNull?.length,
+          error: evacuationsAsync.hasError ? evacuationsAsync.error : null,
+          fallbackMessage: 'تعذّر تحميل عدد الإخلاءات قيد التنفيذ',
+          label: 'إخلاءات قيد التنفيذ',
+          icon: Icons.exit_to_app_outlined,
+          iconColor: AppColors.danger,
+          iconBackground: AppColors.dangerBg,
+          onTap: () => _scrollTo(_evacuationKey),
+        ),
+      if (evacuationsAsync != null && siteVisitsAsync != null)
+        _Stat.overdue: () {
+          final overdueCount = _combinedOverdueCount(evacuationsAsync, siteVisitsAsync);
+          return _statCardFor(
+            value: overdueCount,
+            error: evacuationsAsync.hasError
+                ? evacuationsAsync.error
+                : (siteVisitsAsync.hasError ? siteVisitsAsync.error : null),
+            fallbackMessage: 'تعذّر تحميل عدد الإجراءات المتأخرة',
+            label: 'إجراءات متأخرة',
+            icon: Icons.warning_amber_rounded,
+            iconColor: AppColors.danger,
+            iconBackground: AppColors.dangerBg,
+            highlight: (overdueCount ?? 0) > 0,
+            onTap: () => _scrollTo(evacuationOverdue ? _evacuationKey : _siteVisitKey),
+          );
+        }(),
+      if (siteVisitsAsync != null)
+        _Stat.siteVisit: _statCardFor(
+          value: siteVisitsAsync.valueOrNull?.length,
+          error: siteVisitsAsync.hasError ? siteVisitsAsync.error : null,
+          fallbackMessage: 'تعذّر تحميل عدد الحالات بانتظار زيارة ميدانية',
+          label: 'بانتظار زيارة ميدانية',
+          icon: Icons.domain_verification_outlined,
+          iconColor: AppColors.info,
+          iconBackground: AppColors.infoBg,
+          onTap: () => _scrollTo(_siteVisitKey),
+        ),
+      if (demolitionsAsync != null)
+        _Stat.demolition: _statCardFor(
+          value: demolitionsAsync.valueOrNull?.length,
+          error: demolitionsAsync.hasError ? demolitionsAsync.error : null,
+          fallbackMessage: 'تعذّر تحميل عدد أوامر الهدم',
+          label: 'أوامر هدم قيد التنفيذ',
+          icon: Icons.domain_disabled_outlined,
+          iconColor: AppColors.danger,
+          iconBackground: AppColors.dangerBg,
+          onTap: () => _scrollTo(_demolitionKey),
+        ),
+      _Stat.closed: _statCardFor(
         value: closedThisMonthAsync.valueOrNull,
         error: closedThisMonthAsync.hasError ? closedThisMonthAsync.error : null,
         fallbackMessage: 'تعذّر تحميل عدد الحالات المُغلقة هذا الشهر',
@@ -441,6 +554,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         iconColor: AppColors.success,
         iconBackground: AppColors.successBg,
       ),
+    };
+
+    // Which four (or fewer) cards each role leads with. The Administrator's
+    // set is the dashboard's original four, unchanged.
+    final order = switch (role) {
+      AppRole.admin => const [_Stat.triage, _Stat.overdue, _Stat.siteVisit, _Stat.closed],
+      AppRole.engineering => const [_Stat.triage, _Stat.review, _Stat.assessment, _Stat.closed],
+      AppRole.police => const [_Stat.overdue, _Stat.evacuation, _Stat.siteVisit, _Stat.demolition],
+      AppRole.callCenter => const [_Stat.closed],
+    };
+    final cards = [
+      for (final stat in order)
+        if (available[stat] != null) available[stat]!,
     ];
 
     return LayoutBuilder(
@@ -700,3 +826,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return '${diff.inHours} ساعة';
   }
 }
+
+/// The stat cards the dashboard can show. Which of them a given role gets,
+/// and in what order, is decided in [_DashboardScreenState._buildStatRow].
+enum _Stat { triage, review, assessment, evacuation, overdue, siteVisit, demolition, closed }

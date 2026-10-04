@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../core/constants/access_policy.dart';
 import '../core/widgets/app_shell.dart';
 import '../features/auth/auth_providers.dart';
 import '../features/auth/login_screen.dart';
@@ -37,6 +38,16 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       if (!isSignedIn && !isLoggingIn) return '/login';
       if (isSignedIn && isLoggingIn) return '/dashboard';
+
+      // Role guard: the sidebar only HIDES links a role shouldn't use; it
+      // never stopped anyone typing /triage/<id> into the address bar.
+      // This sends a role away from any screen it isn't allowed to open.
+      // While the role is still resolving (null) nothing is blocked — the
+      // app shell shows its own loading / no-access state in that window,
+      // and this re-runs the moment the role arrives (see the notifier
+      // below). The Firestore security rules remain the real enforcement.
+      final role = ref.read(currentUserRoleProvider).valueOrNull;
+      if (role != null && !AccessPolicy.canOpen(state.uri.path, role)) return '/dashboard';
       return null;
     },
     routes: [
@@ -173,5 +184,8 @@ final routerProvider = Provider<GoRouter>((ref) {
 class _AuthRefreshNotifier extends ChangeNotifier {
   _AuthRefreshNotifier(Ref ref) {
     ref.listen(authStateChangesProvider, (_, __) => notifyListeners());
+    // Re-evaluate the role guard when the role resolves or changes — e.g.
+    // an administrator re-roling someone who is already on a screen.
+    ref.listen(currentUserRoleProvider, (_, __) => notifyListeners());
   }
 }

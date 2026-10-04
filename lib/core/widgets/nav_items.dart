@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../constants/access_policy.dart';
 import '../constants/roles.dart';
 
 /// One entry in the sidebar navigation.
@@ -33,9 +34,9 @@ class NavGroup {
 }
 
 /// The sidebar structure, matching the approved design prototype's nav
-/// groups exactly (§3, Appendix A). Admin implicitly sees everything —
-/// enforced by including it in every `allowedRoles` set below, mirroring
-/// "Admin: full visibility and edit rights across all cases" in Appendix A.
+/// groups exactly (§3, Appendix A). Who sees each item now comes from
+/// [AccessPolicy], the same table the router's route guard and the
+/// dashboard use, so the three can't drift apart.
 final navGroups = <NavGroup>[
   NavGroup(label: 'عام', items: [
     const NavItem(route: '/dashboard', icon: Icons.space_dashboard_outlined, label: 'الإجراءات المستحقة', allowedRoles: null),
@@ -43,29 +44,29 @@ final navGroups = <NavGroup>[
   ]),
   NavGroup(label: 'مركز الاتصال', items: [
     const NavItem(route: '/intake/new', icon: Icons.add_call, label: 'شكوى جديدة',
-        allowedRoles: {AppRole.callCenter, AppRole.admin}),
+        allowedRoles: AccessPolicy.intake),
   ]),
   NavGroup(label: 'الفريق الهندسي', items: [
     const NavItem(route: '/triage', icon: Icons.rule_outlined, label: 'فرز الأولوية',
-        allowedRoles: {AppRole.engineering, AppRole.admin}),
+        allowedRoles: AccessPolicy.triage),
     const NavItem(route: '/review', icon: Icons.gavel_outlined, label: 'المراجعة والقرار',
-        allowedRoles: {AppRole.engineering, AppRole.admin}),
+        allowedRoles: AccessPolicy.review),
     const NavItem(route: '/assessment', icon: Icons.architecture_outlined, label: 'التقييم والترميم',
-        allowedRoles: {AppRole.engineering, AppRole.admin}),
+        allowedRoles: AccessPolicy.assessment),
   ]),
   NavGroup(label: 'فريق الشرطة', items: [
     const NavItem(route: '/evacuation', icon: Icons.directions_run_outlined, label: 'تنفيذ الإخلاء',
-        allowedRoles: {AppRole.police, AppRole.admin}),
+        allowedRoles: AccessPolicy.evacuation),
     const NavItem(route: '/sitevisits', icon: Icons.domain_verification_outlined, label: 'زيارة ميدانية',
-        allowedRoles: {AppRole.police, AppRole.admin}),
+        allowedRoles: AccessPolicy.siteVisits),
     const NavItem(route: '/demolition', icon: Icons.domain_disabled_outlined, label: 'أوامر الهدم',
-        allowedRoles: {AppRole.police, AppRole.admin}),
+        allowedRoles: AccessPolicy.demolition),
   ]),
   NavGroup(label: 'التقارير والإدارة', items: [
     const NavItem(route: '/reports', icon: Icons.bar_chart_outlined, label: 'التقارير', allowedRoles: null),
     const NavItem(route: '/import', icon: Icons.upload_file_outlined, label: 'استيراد إنذارات سابقة',
-        allowedRoles: {AppRole.admin}),
+        allowedRoles: AccessPolicy.imports),
     const NavItem(route: '/admin', icon: Icons.admin_panel_settings_outlined, label: 'إعدادات النظام',
-        allowedRoles: {AppRole.admin}),
+        allowedRoles: AccessPolicy.adminSettings),
   ]),
 ];

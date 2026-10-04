@@ -268,7 +268,7 @@ class _TopBar extends ConsumerWidget {
       child: Row(
         children: [
           const Spacer(),
-          AppIconButton(icon: Icons.notifications_outlined, showDot: true, onPressed: () {}),
+        
           const SizedBox(width: 14),
           Container(
             padding: const EdgeInsets.only(right: 16),

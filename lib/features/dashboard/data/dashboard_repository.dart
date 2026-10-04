@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/firestore_paths.dart';
 import '../../assessment/models/assessment.dart';
+import '../../auth/session_providers.dart';
 import '../../demolition/models/demolition_order.dart';
 import '../../intake/data/intake_repository.dart' show firestoreProvider;
 import '../../intake/models/case.dart';
@@ -153,19 +154,41 @@ class DashboardRepository {
   }
 }
 
+// ============================================================================
+// Providers
+//
+// Every provider below watches [signedInUidProvider]. These are long-lived
+// (not autoDispose) because the dashboard is revisited constantly and a
+// fresh Firestore subscription on every visit would flash loading states.
+// The cost of that is that they outlive a login session: when a user signs
+// out, their Firestore listeners are cut off with `permission-denied`, and
+// a plain StreamProvider keeps that error as its state forever. The next
+// person to sign in on the same page load — an engineer logging in after
+// an administrator, say — then saw every queue red with "permission
+// denied", even though their own account was fully entitled to the data.
+// Depending on the uid makes each provider rebuild, with a fresh listener
+// under the new user's credentials, whenever the signed-in user changes.
+//
+// When nobody is signed in there is nothing to listen to, so the providers
+// stay quiet instead of opening a listener that is guaranteed to be denied.
+// ============================================================================
+
 /// Live stream of complaints awaiting triage.
 final complaintsAwaitingTriageProvider = StreamProvider<List<Complaint>>((ref) {
+  if (ref.watch(signedInUidProvider) == null) return const Stream<List<Complaint>>.empty();
   return ref.watch(dashboardRepositoryProvider).watchComplaintsAwaitingTriage();
 });
 
 /// Live stream of triaged cases with no Decision yet.
 final casesAwaitingReviewProvider = StreamProvider<List<Case>>((ref) {
+  if (ref.watch(signedInUidProvider) == null) return const Stream<List<Case>>.empty();
   return ref.watch(dashboardRepositoryProvider).watchCasesAwaitingReview();
 });
 
 /// Live stream of evacuation decisions still awaiting their compliance
 /// check.
 final evacuationsInProgressProvider = StreamProvider<List<Decision>>((ref) {
+  if (ref.watch(signedInUidProvider) == null) return const Stream<List<Decision>>.empty();
   return ref.watch(dashboardRepositoryProvider).watchEvacuationsInProgress();
 });
 
@@ -174,21 +197,25 @@ final evacuationsInProgressProvider = StreamProvider<List<Decision>>((ref) {
 /// aggregate query needed, the same reasoning as reading `.length` off
 /// the triage queue for its own stat card.
 final siteVisitsNeededProvider = StreamProvider<List<Decision>>((ref) {
+  if (ref.watch(signedInUidProvider) == null) return const Stream<List<Decision>>.empty();
   return ref.watch(dashboardRepositoryProvider).watchSiteVisitsNeeded();
 });
 
 /// Live stream of assessments awaiting the external firm's opinion.
 final assessmentsPendingProvider = StreamProvider<List<Assessment>>((ref) {
+  if (ref.watch(signedInUidProvider) == null) return const Stream<List<Assessment>>.empty();
   return ref.watch(dashboardRepositoryProvider).watchAssessmentsPending();
 });
 
 /// Live stream of demolition orders not yet executed.
 final demolitionsInProgressProvider = StreamProvider<List<DemolitionOrder>>((ref) {
+  if (ref.watch(signedInUidProvider) == null) return const Stream<List<DemolitionOrder>>.empty();
   return ref.watch(dashboardRepositoryProvider).watchDemolitionsInProgress();
 });
 
 /// One parcel by ID, cached per ID by Riverpod's family mechanism.
 final parcelByIdProvider = FutureProvider.family<Parcel?, String>((ref, parcelId) {
+  if (ref.watch(signedInUidProvider) == null) return Future<Parcel?>.value(null);
   return ref.watch(dashboardRepositoryProvider).getParcelById(parcelId);
 });
 
@@ -196,5 +223,6 @@ final parcelByIdProvider = FutureProvider.family<Parcel?, String>((ref, parcelId
 /// first run) doesn't persist forever — re-entering Dashboard retries
 /// fresh. See the in-app error-detail dialog for why this matters.
 final closedThisMonthCountProvider = FutureProvider.autoDispose<int>((ref) {
+  if (ref.watch(signedInUidProvider) == null) return Future<int>.value(0);
   return ref.watch(dashboardRepositoryProvider).countClosedThisMonth();
 });
